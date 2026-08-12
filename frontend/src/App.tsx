@@ -3,6 +3,7 @@ import Layout from './components/layout/Layout'
 import HomePage from './pages/HomePage'
 import ExerciseSelectionPage from './pages/ExerciseSelectionPage'
 import ExerciseDetailPage from './pages/ExerciseDetailPage'
+import CalibrationPage from './pages/CalibrationPage'
 import LiveWorkoutPage from './pages/LiveWorkoutPage'
 import SessionSummaryPage from './pages/SessionSummaryPage'
 import ProgressPage from './pages/ProgressPage'
@@ -19,6 +20,8 @@ export default function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/exercises" element={<ExerciseSelectionPage />} />
             <Route path="/exercises/:id" element={<ExerciseDetailPage />} />
+            {/* Learn & Calibrate flow — entered from ExerciseDetailPage */}
+            <Route path="/calibrate/:id" element={<CalibrationPage />} />
             <Route path="/workout" element={<LiveWorkoutPage />} />
             <Route path="/session-summary" element={<SessionSummaryPage />} />
             <Route path="/progress" element={<ProgressPage />} />

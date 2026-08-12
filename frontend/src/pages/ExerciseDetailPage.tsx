@@ -128,7 +128,7 @@ export default function ExerciseDetailPage() {
 
   const handleStart = () => {
     setSelectedExercise(exercise)
-    navigate('/workout')
+    navigate(`/calibrate/${exercise.id}`)
   }
 
   return (
@@ -265,11 +265,11 @@ export default function ExerciseDetailPage() {
           className="w-full bg-primary text-white font-bold text-base rounded-2xl py-4 active:bg-primary-dark transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-dark min-h-[56px]"
           aria-label={`Start ${exercise.name}`}
         >
-          Start {exercise.name}
+          Learn &amp; Calibrate
         </button>
         <p className="text-xs text-slate-400 text-center mt-3 leading-relaxed px-4">
-          Your camera will be used for real-time pose detection.
-          Ensure you have adequate space and lighting.
+          You'll be guided through {exercise.instructions?.length ?? 'a few'} key positions
+          before the live workout begins.
         </p>
       </div>
 
