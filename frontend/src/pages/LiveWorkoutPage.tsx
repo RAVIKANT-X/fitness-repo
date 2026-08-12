@@ -330,18 +330,11 @@ export default function LiveWorkoutPage() {
           </div>
         )}
 
-        {/* ── Reps + form status strip — bottom of camera ──────────────── */}
+        {/* ── Rep counter + form status strip — bottom of camera ────────── */}
         {isActive && selectedExercise && (
-          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent pt-10 pb-3 px-4 pointer-events-none">
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent pt-16 pb-3 px-4 pointer-events-none">
             <div className="flex items-end justify-between">
-              {/* Rep count */}
-              <div>
-                <p className="text-[10px] text-white/60 font-semibold uppercase tracking-widest mb-0.5">Reps</p>
-                <p className="text-6xl font-black text-white tabular-nums leading-none drop-shadow-lg">
-                  {String(repCount).padStart(2, '0')}
-                </p>
-              </div>
-              {/* Form status */}
+              <RepCounter repCount={repCount} phase={phase} />
               <FormPill status={formStatus} />
             </div>
           </div>
@@ -451,6 +444,100 @@ function AngleChips({ angles, exerciseId }: { angles: JointAngles; exerciseId: s
         </div>
       ))}
     </>
+  )
+}
+
+// ── Rep Counter ───────────────────────────────────────────────────────────────
+
+function RepCounter({ repCount, phase }: { repCount: number; phase: MovementPhase }) {
+  const [flash, setFlash] = useState(false)
+  const prevCountRef = useRef(repCount)
+
+  useEffect(() => {
+    if (repCount > prevCountRef.current) {
+      // Rep just completed — trigger flash animation
+      setFlash(true)
+      const t = setTimeout(() => setFlash(false), 600)
+      prevCountRef.current = repCount
+      return () => clearTimeout(t)
+    }
+    prevCountRef.current = repCount
+  }, [repCount])
+
+  // Progress ring: shows movement phase as a partial arc
+  const phaseProgress: Partial<Record<MovementPhase, number>> = {
+    STANDING:   0,   EXTENDED:   0,
+    DESCENDING: 35,  CURLING:    35,
+    BOTTOM:     70,  PEAK:       70,
+    ASCENDING:  85,  RETURNING:  85,
+    TOP:        0,
+  }
+  const progress = phaseProgress[phase] ?? 0
+  const radius = 44
+  const circumference = 2 * Math.PI * radius
+  const dashOffset = circumference - (progress / 100) * circumference
+
+  return (
+    <div className="relative flex items-end gap-3">
+      {/* SVG ring behind the number */}
+      <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
+        <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 100 100">
+          {/* Track */}
+          <circle
+            cx="50" cy="50" r={radius}
+            fill="none"
+            stroke="rgba(255,255,255,0.10)"
+            strokeWidth="5"
+          />
+          {/* Progress arc */}
+          <circle
+            cx="50" cy="50" r={radius}
+            fill="none"
+            stroke={
+              phase === 'BOTTOM' || phase === 'PEAK'
+                ? 'rgba(34,197,94,0.90)'
+                : phase === 'ASCENDING' || phase === 'RETURNING'
+                ? 'rgba(34,197,94,0.60)'
+                : 'rgba(255,255,255,0.25)'
+            }
+            strokeWidth="5"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={dashOffset}
+            style={{ transition: 'stroke-dashoffset 0.2s ease, stroke 0.2s ease' }}
+          />
+        </svg>
+
+        {/* Rep number */}
+        <div className="flex flex-col items-center z-10">
+          <span className="text-[10px] text-white/50 font-bold uppercase tracking-widest leading-none mb-1">
+            REPS
+          </span>
+          <span
+            className="text-5xl font-black text-white tabular-nums leading-none drop-shadow-lg"
+            style={{
+              transform: flash ? 'scale(1.25)' : 'scale(1)',
+              color: flash ? '#22c55e' : 'white',
+              textShadow: flash ? '0 0 24px rgba(34,197,94,0.8)' : '0 2px 8px rgba(0,0,0,0.6)',
+              transition: 'transform 0.15s cubic-bezier(0.34,1.56,0.64,1), color 0.15s ease, text-shadow 0.15s ease',
+            }}
+          >
+            {String(repCount).padStart(2, '0')}
+          </span>
+        </div>
+      </div>
+
+      {/* Flash ring overlay — pulses green on rep complete */}
+      {flash && (
+        <div
+          className="absolute inset-0 rounded-full pointer-events-none"
+          style={{
+            background: 'radial-gradient(circle, rgba(34,197,94,0.25) 0%, transparent 70%)',
+            animation: 'fadeIn 0.1s ease both',
+          }}
+        />
+      )}
+    </div>
   )
 }
 
