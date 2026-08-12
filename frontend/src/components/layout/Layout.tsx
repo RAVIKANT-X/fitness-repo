@@ -73,9 +73,18 @@ export default function Layout() {
 
         {/* ── Mobile header (hidden on desktop) ─────────────────── */}
         {showHeader && (
-          <header className="md:hidden sticky top-0 z-40 bg-surface border-b border-border">
+          <header
+            className="md:hidden sticky top-0 z-40"
+            style={{
+              background: 'rgba(244,246,248,0.80)',
+              backdropFilter: 'blur(20px) saturate(1.6)',
+              WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
+              borderBottom: '1px solid rgba(229,231,235,0.6)',
+            }}
+          >
             <div className="flex items-center gap-2.5 px-4 h-14">
-              <span className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center shrink-0">
+              <span className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center shrink-0"
+                style={{ boxShadow: '0 2px 8px rgba(22,163,74,0.30)' }}>
                 <FitCoachIcon />
               </span>
               <span className="font-bold text-slate-900 text-sm tracking-tight">FitCoach AI</span>
@@ -91,8 +100,8 @@ export default function Layout() {
             'md:max-w-[480px] md:mx-auto md:w-full',
             // Horizontal padding
             'px-4',
-            // Vertical padding — extra bottom on mobile to clear BottomNav
-            showHeader ? 'py-5 pb-28 md:pb-8' : 'pb-0',
+            // Vertical padding — extra bottom on mobile to clear floating BottomNav
+            showHeader ? 'py-5 pb-36 md:pb-8' : 'pb-0',
           ].join(' ')}
         >
           <Outlet />

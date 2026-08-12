@@ -230,7 +230,18 @@ export const EXERCISE_MAP: Record<string, ExerciseDefinition> = Object.fromEntri
   EXERCISE_LIBRARY.map((ex) => [ex.id, ex]),
 )
 
-/** Convenience lookup — returns undefined for unknown IDs. */
+/** Convenience lookup — checks built-in map first, then custom localStorage exercises. */
 export function getExerciseById(id: string): ExerciseDefinition | undefined {
-  return EXERCISE_MAP[id]
+  if (EXERCISE_MAP[id]) return EXERCISE_MAP[id]
+  // Fall back to custom exercises stored in localStorage
+  try {
+    const raw = localStorage.getItem('fitcoach_custom_exercises')
+    if (raw) {
+      const customs = JSON.parse(raw) as ExerciseDefinition[]
+      return customs.find((ex) => ex.id === id)
+    }
+  } catch {
+    // ignore
+  }
+  return undefined
 }
