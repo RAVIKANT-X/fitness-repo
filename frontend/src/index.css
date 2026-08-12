@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base styles ────────────────────────────────────────────── */
+@layer base {
+  html {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-background text-slate-900;
+    /* Prevent iOS tap highlight */
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Smooth scrolling everywhere */
+  * {
+    scroll-behavior: smooth;
+  }
+}
+
+/* ── Component utilities ─────────────────────────────────────── */
+@layer components {
+  /* Standard page padding */
+  .page-padding {
+    @apply px-4 py-6;
+  }
+
+  /* Card base — used as starting point for Card component */
+  .card-base {
+    @apply bg-surface rounded-card shadow-card p-5;
+  }
+
+  /* Bottom nav safe area clearance on iOS */
+  .nav-safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
