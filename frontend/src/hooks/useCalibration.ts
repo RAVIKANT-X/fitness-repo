@@ -1,18 +1,15 @@
 /**
  * useCalibration — state machine hook for the Learn & Calibrate flow.
  *
- * Drives the full calibration pipeline:
- *   EXPLAIN → STEP (per step) → STEP_FAILED (on wrong) → REPORT → LIVE
+ * Flow:  EXPLAIN → STEP (per step) → STEP_FAILED → REPORT → LIVE
  *
- * Each step:
- *   1. Reads pose frames via `poses` prop.
- *   2. Calls evaluateFrame() on every frame while stage === 'STEP'.
- *   3. Accumulates consecutive passing frames.
- *   4. When consecutivePassFrames >= step.holdFrames → PASS → advance.
- *   5. On FAIL → capture the last frame evaluation → show correction.
+ * Manual controls (new):
+ *   handleAnalyzeStep  — user taps "Analyze Step": snapshot current pose,
+ *                        score it, pass or show correction.
+ *   handleSkipStep     — user skips: records a 100-score pass with no issues.
  *
- * Returns:
- *   stage, currentStep, stepResults, liveEval, progressPct, handlers.
+ * Auto-advance is kept as a fallback: if the user holds the position correctly
+ * for holdFrames consecutive frames it still passes automatically.
  */
 
 import { useRef, useState, useEffect, useCallback } from 'react'
@@ -31,8 +28,7 @@ import {
 import { getStepsForExercise } from '../features/calibration/exerciseSteps'
 import type { FrameEvaluation } from '../features/calibration/calibrationEngine'
 
-const DEFAULT_HOLD_FRAMES = 15    // ~0.5 s at 30 fps
-const FAIL_WINDOW = 30            // check after 30 frames if still failing
+const DEFAULT_HOLD_FRAMES = 20    // auto-advance: ~0.67 s at 30 fps
 
 interface UseCalibrationOptions {
   poses: PoseResult[]
@@ -48,11 +44,15 @@ interface UseCalibrationReturn {
   consecutivePassFrames: number
   holdFramesRequired: number
   movementProfile: MovementProfile | null
-  /** User confirmed they read the explanation. Start step 0. */
+  /** User confirmed they read the explanation → start step 0. */
   handleStartCalibration: () => void
-  /** User wants to retry the current step after a failure. */
+  /** Manually trigger analysis of the current pose snapshot. */
+  handleAnalyzeStep: () => void
+  /** Skip the current step entirely (records a perfect score). */
+  handleSkipStep: () => void
+  /** Retry after a failure. */
   handleRetryStep: () => void
-  /** All steps passed — transition to live workout. */
+  /** Transition to live workout. */
   handleStartLive: () => void
 }
 
@@ -62,42 +62,77 @@ export function useCalibration({
 }: UseCalibrationOptions): UseCalibrationReturn {
   const steps = exercise ? getStepsForExercise(exercise.id) : []
 
-  const [stage, setStage] = useState<CalibrationStage>('EXPLAIN')
-  const [currentStepIndex, setCurrentStepIndex] = useState(0)
-  const [stepResults, setStepResults] = useState<StepResult[]>([])
-  const [liveEval, setLiveEval] = useState<FrameEvaluation | null>(null)
-  const [consecutivePassFrames, setConsecutivePassFrames] = useState(0)
-  const [movementProfile, setMovementProfile] = useState<MovementProfile | null>(null)
+  const [stage, setStage]                         = useState<CalibrationStage>('EXPLAIN')
+  const [currentStepIndex, setCurrentStepIndex]   = useState(0)
+  const [stepResults, setStepResults]             = useState<StepResult[]>([])
+  const [liveEval, setLiveEval]                   = useState<FrameEvaluation | null>(null)
+  const [consecutivePassFrames, setConsPass]      = useState(0)
+  const [movementProfile, setMovementProfile]     = useState<MovementProfile | null>(null)
 
-  // Refs for frame-level state (avoid stale closures in rAF)
-  const consecutivePassRef = useRef(0)
-  const frameScoreWindowRef = useRef<number[]>([])
-  const frameCountRef = useRef(0)
-  const stageRef = useRef<CalibrationStage>('EXPLAIN')
-  const currentStepIndexRef = useRef(0)
-  const stepAttemptsRef = useRef<number[]>([])
+  // ── Refs (frame-hot-path — never cause re-renders) ────────────────────────
+  const consecutivePassRef    = useRef(0)
+  const frameScoreWindowRef   = useRef<number[]>([])
+  const frameCountRef         = useRef(0)
+  const stageRef              = useRef<CalibrationStage>('EXPLAIN')
+  const currentStepIndexRef   = useRef(0)
+  const stepAttemptsRef       = useRef<number[]>([])
+  const latestPosesRef        = useRef<PoseResult[]>([])
+  const latestEvalRef         = useRef<FrameEvaluation | null>(null)
 
-  // Keep refs in sync
+  // Keep refs in sync with state
   useEffect(() => { stageRef.current = stage }, [stage])
   useEffect(() => { currentStepIndexRef.current = currentStepIndex }, [currentStepIndex])
+  useEffect(() => { latestPosesRef.current = poses }, [poses])
 
-  // Reset everything when exercise changes
+  // ── Reset on exercise change ───────────────────────────────────────────────
   useEffect(() => {
-    setStage('EXPLAIN')
-    setCurrentStepIndex(0)
+    setStage('EXPLAIN');              stageRef.current = 'EXPLAIN'
+    setCurrentStepIndex(0);           currentStepIndexRef.current = 0
     setStepResults([])
-    setLiveEval(null)
-    setConsecutivePassFrames(0)
+    setLiveEval(null);                latestEvalRef.current = null
+    setConsPass(0);                   consecutivePassRef.current = 0
     setMovementProfile(null)
-    consecutivePassRef.current = 0
     frameScoreWindowRef.current = []
     frameCountRef.current = 0
     stepAttemptsRef.current = []
-    stageRef.current = 'EXPLAIN'
-    currentStepIndexRef.current = 0
   }, [exercise?.id])
 
-  // ── Frame analysis loop ─────────────────────────────────────────────────────
+  // ── Shared: advance to next step or finish ────────────────────────────────
+  const advanceStep = useCallback((
+    newResults: StepResult[],
+    nextIndex: number,
+    exId: string,
+    exName: string,
+  ) => {
+    consecutivePassRef.current = 0
+    frameScoreWindowRef.current = []
+    frameCountRef.current = 0
+    setConsPass(0)
+
+    if (nextIndex >= steps.length) {
+      const overallScore = Math.round(
+        newResults.reduce((s, r) => s + r.score, 0) / newResults.length,
+      )
+      const weakestIndex = newResults.reduce(
+        (minI, r, i, arr) => (r.score < arr[minI].score ? i : minI), 0,
+      )
+      const profile: MovementProfile = {
+        exerciseId: exId,
+        exerciseName: exName,
+        stepResults: newResults,
+        weakestStepIndex: weakestIndex,
+        overallScore,
+        completedAt: new Date().toISOString(),
+      }
+      setMovementProfile(profile)
+      setStage('REPORT');  stageRef.current = 'REPORT'
+    } else {
+      setCurrentStepIndex(nextIndex)
+      currentStepIndexRef.current = nextIndex
+    }
+  }, [steps.length])
+
+  // ── Per-frame analysis loop (auto-advance on hold) ────────────────────────
   useEffect(() => {
     if (stageRef.current !== 'STEP') return
     if (!exercise || steps.length === 0) return
@@ -107,11 +142,8 @@ export function useCalibration({
     const step = steps[stepIndex]
     if (!step) return
 
-    const poseResult = poses[0]
-    // Use normalised landmarks for angle calc (same as analysis engine)
-    const eval_ = evaluateFrame(poseResult.landmarks, step)
-
-    // Update live display
+    const eval_ = evaluateFrame(poses[0].landmarks, step)
+    latestEvalRef.current = eval_
     setLiveEval(eval_)
 
     const holdRequired = step.holdFrames ?? DEFAULT_HOLD_FRAMES
@@ -120,135 +152,130 @@ export function useCalibration({
     if (eval_.passing && eval_.landmarksValid) {
       consecutivePassRef.current += 1
       frameScoreWindowRef.current.push(eval_.frameScore)
-      setConsecutivePassFrames(consecutivePassRef.current)
+      setConsPass(consecutivePassRef.current)
 
       if (consecutivePassRef.current >= holdRequired) {
-        // ── STEP PASSED ────────────────────────────────────────────────────
-        const score = averageFrameScores(frameScoreWindowRef.current)
+        // Auto-advance
+        const score   = averageFrameScores(frameScoreWindowRef.current)
         const attempts = stepAttemptsRef.current[stepIndex] ?? 1
-
-        const result: StepResult = {
-          step,
-          score,
-          issues: buildStepIssues(eval_),
-          passed: true,
-          attempts,
-        }
-
-        // Reset per-step counters
-        consecutivePassRef.current = 0
-        frameScoreWindowRef.current = []
-        frameCountRef.current = 0
-        setConsecutivePassFrames(0)
-
+        const result: StepResult = { step, score, issues: [], passed: true, attempts }
         const newResults = [...stepResults, result]
         setStepResults(newResults)
-
-        const nextIndex = stepIndex + 1
-
-        if (nextIndex >= steps.length) {
-          // ── ALL STEPS DONE — build movement profile ──────────────────────
-          const overallScore = Math.round(
-            newResults.reduce((s, r) => s + r.score, 0) / newResults.length,
-          )
-          const weakestIndex = newResults.reduce(
-            (minI, r, i, arr) => (r.score < arr[minI].score ? i : minI),
-            0,
-          )
-          const profile: MovementProfile = {
-            exerciseId: exercise.id,
-            exerciseName: exercise.name,
-            stepResults: newResults,
-            weakestStepIndex: weakestIndex,
-            overallScore,
-            completedAt: new Date().toISOString(),
-          }
-          setMovementProfile(profile)
-          setStage('REPORT')
-          stageRef.current = 'REPORT'
-        } else {
-          setCurrentStepIndex(nextIndex)
-          currentStepIndexRef.current = nextIndex
-        }
+        advanceStep(newResults, stepIndex + 1, exercise.id, exercise.name)
       }
     } else {
-      // Not passing — reset consecutive run
       consecutivePassRef.current = 0
       frameScoreWindowRef.current = []
-      setConsecutivePassFrames(0)
-
-      // After FAIL_WINDOW frames with no pass — show correction
-      if (eval_.landmarksValid && frameCountRef.current >= FAIL_WINDOW) {
-        const score = Math.max(0, eval_.frameScore - 10)  // penalise for repeated failure
-        const attempts = (stepAttemptsRef.current[stepIndex] ?? 0) + 1
-        stepAttemptsRef.current[stepIndex] = attempts
-
-        // Build a partial result for display purposes
-        const failResult: StepResult = {
-          step,
-          score,
-          issues: buildStepIssues(eval_),
-          passed: false,
-          attempts,
-        }
-
-        // Store as preliminary result (will be overwritten on pass)
-        setStepResults((prev) => {
-          const next = [...prev]
-          next[stepIndex] = failResult
-          return next
-        })
-
-        frameCountRef.current = 0   // reset window so it can trigger again if still wrong
-        setStage('STEP_FAILED')
-        stageRef.current = 'STEP_FAILED'
-      }
+      setConsPass(0)
     }
-  }, [poses, exercise, steps, stepResults])
+  }, [poses, exercise, steps, stepResults, advanceStep])
 
-  // ── Handlers ────────────────────────────────────────────────────────────────
+  // ── handleAnalyzeStep — manual snapshot & score ──────────────────────────
+  const handleAnalyzeStep = useCallback(() => {
+    if (stageRef.current !== 'STEP') return
+    if (!exercise || steps.length === 0) return
 
+    const stepIndex = currentStepIndexRef.current
+    const step = steps[stepIndex]
+    if (!step) return
+
+    const poses_ = latestPosesRef.current
+    if (poses_.length === 0 || poses_[0].landmarks.length === 0) return
+
+    const eval_ = evaluateFrame(poses_[0].landmarks, step)
+    latestEvalRef.current = eval_
+    setLiveEval(eval_)
+
+    const attempts = (stepAttemptsRef.current[stepIndex] ?? 0) + 1
+    stepAttemptsRef.current[stepIndex] = attempts
+
+    if (eval_.passing && eval_.landmarksValid) {
+      // Pass
+      const score = eval_.frameScore
+      const result: StepResult = { step, score, issues: [], passed: true, attempts }
+      const newResults = [...stepResults, result]
+      setStepResults(newResults)
+      consecutivePassRef.current = 0
+      frameScoreWindowRef.current = []
+      frameCountRef.current = 0
+      setConsPass(0)
+      advanceStep(newResults, stepIndex + 1, exercise.id, exercise.name)
+    } else {
+      // Fail — show correction
+      const score = Math.max(0, eval_.frameScore - 5)
+      const failResult: StepResult = {
+        step, score,
+        issues: buildStepIssues(eval_),
+        passed: false, attempts,
+      }
+      setStepResults((prev) => { const n = [...prev]; n[stepIndex] = failResult; return n })
+      frameCountRef.current = 0
+      consecutivePassRef.current = 0
+      frameScoreWindowRef.current = []
+      setConsPass(0)
+      setStage('STEP_FAILED');  stageRef.current = 'STEP_FAILED'
+    }
+  }, [exercise, steps, stepResults, advanceStep])
+
+  // ── handleSkipStep — record a perfect pass and move on ────────────────────
+  const handleSkipStep = useCallback(() => {
+    if (!exercise || steps.length === 0) return
+    const stepIndex = currentStepIndexRef.current
+    const step = steps[stepIndex]
+    if (!step) return
+
+    const result: StepResult = {
+      step, score: 100, issues: [], passed: true,
+      attempts: stepAttemptsRef.current[stepIndex] ?? 0,
+    }
+    const newResults = [...stepResults, result]
+    setStepResults(newResults)
+    consecutivePassRef.current = 0
+    frameScoreWindowRef.current = []
+    frameCountRef.current = 0
+    setConsPass(0)
+    // If we were in STEP_FAILED, go back to STEP state before advancing
+    stageRef.current = 'STEP'
+    setStage('STEP')
+    advanceStep(newResults, stepIndex + 1, exercise.id, exercise.name)
+  }, [exercise, steps, stepResults, advanceStep])
+
+  // ── handleStartCalibration ────────────────────────────────────────────────
   const handleStartCalibration = useCallback(() => {
     consecutivePassRef.current = 0
     frameScoreWindowRef.current = []
     frameCountRef.current = 0
+    stepAttemptsRef.current = []
     setStepResults([])
-    setCurrentStepIndex(0)
-    currentStepIndexRef.current = 0
-    setConsecutivePassFrames(0)
-    setStage('STEP')
-    stageRef.current = 'STEP'
+    setCurrentStepIndex(0);  currentStepIndexRef.current = 0
+    setConsPass(0)
+    setStage('STEP');  stageRef.current = 'STEP'
   }, [])
 
+  // ── handleRetryStep ───────────────────────────────────────────────────────
   const handleRetryStep = useCallback(() => {
     consecutivePassRef.current = 0
     frameScoreWindowRef.current = []
     frameCountRef.current = 0
-    setConsecutivePassFrames(0)
-    // Remove the failed partial result for this step
+    setConsPass(0)
     setStepResults((prev) => prev.slice(0, currentStepIndexRef.current))
-    setStage('STEP')
-    stageRef.current = 'STEP'
+    setStage('STEP');  stageRef.current = 'STEP'
   }, [])
 
+  // ── handleStartLive ───────────────────────────────────────────────────────
   const handleStartLive = useCallback(() => {
-    setStage('LIVE')
-    stageRef.current = 'LIVE'
+    setStage('LIVE');  stageRef.current = 'LIVE'
   }, [])
 
-  const holdFramesRequired =
-    steps[currentStepIndex]?.holdFrames ?? DEFAULT_HOLD_FRAMES
+  const holdFramesRequired = steps[currentStepIndex]?.holdFrames ?? DEFAULT_HOLD_FRAMES
 
   return {
-    stage,
-    currentStepIndex,
-    steps,
-    stepResults,
-    liveEval,
-    consecutivePassFrames,
-    holdFramesRequired,
+    stage, currentStepIndex, steps, stepResults,
+    liveEval, consecutivePassFrames, holdFramesRequired,
     movementProfile,
     handleStartCalibration,
+    handleAnalyzeStep,
+    handleSkipStep,
     handleRetryStep,
     handleStartLive,
   }
