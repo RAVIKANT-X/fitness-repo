@@ -1,23 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-
   "version": 2,
-
-  "comment": "Vercel deployment configuration for the Node.js/Express backend.",
-
-  "rootDirectory": "backend",
-
-  "functions": {
-    "api/index.ts": {
-      "runtime": "@vercel/node@4",
-      "maxDuration": 10
-    }
-  },
-
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/api/index"
-    }
-  ]
+  "comment": "Root config — actual deployment config lives in backend/vercel.json",
+  "rootDirectory": "backend"
 }
