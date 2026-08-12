@@ -3,13 +3,13 @@
 
   "version": 2,
 
-  "comment": "Vercel deployment configuration for the FastAPI backend. The frontend is deployed as a separate Vercel project at posture-fitness.vercel.app.",
+  "comment": "Vercel deployment configuration for the Node.js/Express backend.",
 
   "rootDirectory": "backend",
 
   "functions": {
-    "api/index.py": {
-      "runtime": "vercel-python@4.3.0",
+    "api/index.ts": {
+      "runtime": "@vercel/node@4",
       "maxDuration": 10
     }
   },

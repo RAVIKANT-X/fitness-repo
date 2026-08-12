@@ -23,10 +23,9 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8001:8000"
-    volumes:
-      - ./backend:/app
-    env_file:
-      - .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
     depends_on:
       postgres:
         condition: service_healthy

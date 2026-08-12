@@ -1,19 +1,24 @@
-FROM python:3.11-slim
+# ── Build stage ──────────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
 
 WORKDIR /app
+COPY package*.json ./
+RUN npm ci
 
-# Install dependencies first (layer caching)
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY tsconfig.json ./
+COPY src ./src
 
-# Source is volume-mounted in development; this copy is for production builds
-COPY . .
+RUN npm run build
 
-# Make the entrypoint executable
-RUN chmod +x entrypoint.sh
+# ── Runtime stage ─────────────────────────────────────────────────────────────
+FROM node:20-alpine
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+COPY --from=builder /app/dist ./dist
 
 EXPOSE 8000
-
-# Run Alembic migrations then start FastAPI.
-# No --reload: this is the production image.
-CMD ["./entrypoint.sh"]
+# Run migration then start the server
+CMD ["sh", "-c", "node dist/db/migrate.js && node dist/server.js"]
