@@ -6,9 +6,11 @@ import LiveWorkoutPage from './pages/LiveWorkoutPage'
 import SessionSummaryPage from './pages/SessionSummaryPage'
 import ProgressPage from './pages/ProgressPage'
 import ProfilePage from './pages/ProfilePage'
+import { ExerciseProvider } from './hooks/useSelectedExercise'
 
 export default function App() {
   return (
+    <ExerciseProvider>
     <BrowserRouter>
       <Routes>
         <Route element={<Layout />}>
@@ -23,5 +25,6 @@ export default function App() {
         </Route>
       </Routes>
     </BrowserRouter>
+    </ExerciseProvider>
   )
 }

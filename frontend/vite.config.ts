@@ -9,4 +9,10 @@ export default defineConfig({
     port: 5173,
     // Proxy will be configured in Phase 6 when frontend calls backend
   },
+  test: {
+    // Vitest configuration
+    // environment: 'node' is sufficient for pure math/logic tests
+    environment: 'node',
+    include: ['src/tests/**/*.test.ts'],
+  },
 })
