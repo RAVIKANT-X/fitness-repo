@@ -157,9 +157,10 @@ Respond with ONLY a valid JSON object (no markdown, no code fences) in this exac
 Make instructions clear and actionable. Keep each step concise (max 15 words). 
 Common mistakes should be practical warnings. AI monitors should describe specific body angles/alignments to track.`
 
-  // Try to use a CORS-friendly AI endpoint.
-  // Checks window._GEMINI_KEY (user can set this) or falls back to a mock.
-  const geminiKey = (window as unknown as Record<string, unknown>)._GEMINI_KEY as string | undefined
+  // Priority: VITE_ env var (build-time) → window._GEMINI_KEY (runtime console) → mock fallback.
+  const geminiKey =
+    (import.meta.env.VITE_GEMINI_KEY as string | undefined) ||
+    ((window as unknown as Record<string, unknown>)._GEMINI_KEY as string | undefined)
 
   if (geminiKey) {
     const res = await fetch(
@@ -503,8 +504,8 @@ function AddExerciseModal({ onClose, onAdd }: AddExerciseModalProps) {
                   <Sparkles size={13} className="text-violet-500 shrink-0 mt-0.5" />
                   <p className="text-[11px] text-violet-700 leading-relaxed">
                     <strong>AI-powered:</strong> Rules, instructions & form checks are generated automatically from the exercise name using AI.
-                    {!(window as unknown as Record<string, unknown>)._GEMINI_KEY && (
-                      <> Set <code className="bg-white/60 px-1 rounded">window._GEMINI_KEY</code> for live Gemini AI, or use the smart offline fallback.</>
+                    {!import.meta.env.VITE_GEMINI_KEY && !(window as unknown as Record<string, unknown>)._GEMINI_KEY && (
+                      <> Set <code className="bg-white/60 px-1 rounded">VITE_GEMINI_KEY</code> in <code className="bg-white/60 px-1 rounded">.env.local</code> for live Gemini AI, or use the smart offline fallback.</>
                     )}
                   </p>
                 </div>

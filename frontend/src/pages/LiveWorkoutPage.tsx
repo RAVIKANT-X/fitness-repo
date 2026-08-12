@@ -28,12 +28,15 @@ import {
 } from 'lucide-react'
 import CameraView from '../components/workout/CameraView'
 import PoseOverlay from '../components/workout/PoseOverlay'
+import ReferenceGhostCanvas from '../components/workout/ReferenceGhostCanvas'
 import { useCamera } from '../hooks/useCamera'
 import { usePoseLandmarker } from '../hooks/usePoseLandmarker'
 import { useSelectedExercise } from '../hooks/useSelectedExercise'
 import { useAnalysis } from '../hooks/useAnalysis'
+import { useReferenceComparison } from '../hooks/useReferenceComparison'
 import { useVoiceCoach } from '../hooks/useVoiceCoach'
 import { saveSession } from '../services/sessionService'
+import { getReferencePhase } from '../features/reference'
 import type { Deviation, MovementPhase, FormStatus } from '../features/analysis/analysisTypes'
 import type { JointAngles } from '../features/biomechanics/biomechanicsTypes'
 
@@ -72,6 +75,22 @@ export default function LiveWorkoutPage() {
 
   const { analysisResult, resetAnalysis } = useAnalysis({ poses, selectedExercise, isActive })
   const voice = useVoiceCoach()
+
+  // ── True Reference comparison ─────────────────────────────────────────────
+  const currentPhase = analysisResult?.currentPhase ?? 'UNKNOWN'
+  const { liveComparison, matchScore, primaryDeviation, isMatched } = useReferenceComparison({
+    poses,
+    exerciseId: selectedExercise?.id ?? null,
+    currentPhase,
+    isActive,
+  })
+
+  // Reference ghost: get the pose for the current movement phase
+  const refPhase = selectedExercise && currentPhase !== 'UNKNOWN' && currentPhase !== 'INVALID'
+    ? getReferencePhase(selectedExercise.id, currentPhase)
+    : null
+  const userLandmarks = poses[0]?.landmarks ?? []
+  const mirrored = facing === 'user'
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const sessionStartRef = useRef(new Date().toISOString())
@@ -184,6 +203,7 @@ export default function LiveWorkoutPage() {
         {/* Camera + skeleton fill all remaining height */}
         <div className="absolute inset-0">
           <CameraView videoRef={videoRef} status={status} error={error} facing={facing}>
+            {/* User pose skeleton */}
             <PoseOverlay
               canvasRef={canvasRef}
               videoRef={videoRef}
@@ -193,26 +213,86 @@ export default function LiveWorkoutPage() {
               startLoop={startLoop}
               stopLoop={stopLoop}
             />
+            {/* TRUE REFERENCE ghost skeleton — overlaid on user */}
+            {refPhase && isActive && (
+              <ReferenceGhostCanvas
+                videoRef={videoRef}
+                referenceLandmarks={refPhase.pose}
+                userLandmarks={userLandmarks}
+                deviations={liveComparison?.jointDeviations ?? []}
+                mirrored={mirrored}
+                opacity={0.65}
+                visible
+              />
+            )}
           </CameraView>
         </div>
 
-        {/* ── Angle chips overlay — top-left ─────────────────────────────── */}
-        {isActive && landmarksOk && selectedExercise && (
-          <div className="absolute top-3 left-3 flex flex-wrap gap-1.5 pointer-events-none">
-            <AngleChips angles={angles} exerciseId={selectedExercise.id} />
+        {/* ── TRUE REFERENCE + AI COACH labels — top-left ──────────────── */}
+        {isActive && (
+          <div className="absolute top-3 left-3 flex flex-col gap-1.5 pointer-events-none">
+            {refPhase && (
+              <div
+                className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold w-fit"
+                style={{ background: 'rgba(34,197,94,0.85)', color: 'white', backdropFilter: 'blur(8px)' }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-white shrink-0" />
+                TRUE REFERENCE
+              </div>
+            )}
+            {landmarksOk && selectedExercise && (
+              <div className="flex flex-wrap gap-1.5">
+                <AngleChips angles={angles} exerciseId={selectedExercise.id} />
+              </div>
+            )}
           </div>
         )}
 
-        {/* ── Phase badge — top-right ───────────────────────────────────── */}
+        {/* ── Phase badge + match score — top-right ────────────────────── */}
         {isActive && landmarksOk && (
-          <div className="absolute top-3 right-3 pointer-events-none">
+          <div className="absolute top-3 right-3 pointer-events-none flex flex-col items-end gap-1.5">
             <PhasePill phase={phase} />
+            {refPhase && (
+              <div
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[10px] font-bold"
+                style={{
+                  background: isMatched ? 'rgba(34,197,94,0.85)' : 'rgba(0,0,0,0.65)',
+                  color: 'white',
+                  backdropFilter: 'blur(8px)',
+                }}
+              >
+                {isMatched ? '✓ MATCHED' : `${matchScore}%`}
+              </div>
+            )}
           </div>
         )}
 
-        {/* ── Deviation banner — centre-bottom on camera ───────────────── */}
+        {/* ── Reference deviation banner (True Reference comparison) ───── */}
+        {isActive && primaryDeviation && !isMatched && deviations.length === 0 && (
+          <div className="absolute bottom-20 left-3 right-3 pointer-events-none">
+            <div
+              className="rounded-xl px-3 py-2.5"
+              style={{
+                background: primaryDeviation.severity === 'ERROR' ? 'rgba(239,68,68,0.85)' : 'rgba(245,158,11,0.88)',
+                backdropFilter: 'blur(8px)',
+              }}
+            >
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <span className="text-[9px] font-bold text-white/70 uppercase tracking-wider">
+                  AI COACH · {primaryDeviation.affectedJoint}
+                </span>
+                <span className="ml-auto text-[9px] text-white/60">
+                  Ref: {primaryDeviation.referenceAngle.toFixed(0)}° → Yours: {primaryDeviation.userAngle.toFixed(0)}°
+                </span>
+              </div>
+              <p className="text-xs font-semibold text-white leading-snug">{primaryDeviation.correctionText}</p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Analysis deviation banner ─────────────────────────────────── */}
         {isActive && deviations.length > 0 && (
-          <div className="absolute bottom-3 left-3 right-3 pointer-events-none">
+          <div className="absolute bottom-20 left-3 right-3 pointer-events-none">
             {deviations.slice(0, 2).map((d) => (
               <div
                 key={d.id}
@@ -234,7 +314,7 @@ export default function LiveWorkoutPage() {
 
         {/* ── "Adjust position" badge ───────────────────────────────────── */}
         {isActive && !landmarksOk && personVisible && (
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 pointer-events-none">
+          <div className="absolute bottom-36 left-1/2 -translate-x-1/2 pointer-events-none">
             <div className="bg-amber-400/85 text-amber-900 text-xs font-bold px-4 py-2 rounded-full whitespace-nowrap">
               Adjust position — body not fully visible
             </div>
@@ -243,7 +323,7 @@ export default function LiveWorkoutPage() {
 
         {/* ── Waiting badge ─────────────────────────────────────────────── */}
         {isActive && !personVisible && (
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 pointer-events-none">
+          <div className="absolute bottom-36 left-1/2 -translate-x-1/2 pointer-events-none">
             <div className="bg-black/60 text-white/70 text-xs px-4 py-2 rounded-full whitespace-nowrap">
               Waiting for pose…
             </div>
