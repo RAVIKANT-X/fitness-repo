@@ -9,7 +9,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Source is volume-mounted in development; this copy is for production builds
 COPY . .
 
+# Make the entrypoint executable
+RUN chmod +x entrypoint.sh
+
 EXPOSE 8000
 
-# --reload enables hot-reload on source changes in development
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Run Alembic migrations then start FastAPI.
+# No --reload: this is the production image.
+CMD ["./entrypoint.sh"]
