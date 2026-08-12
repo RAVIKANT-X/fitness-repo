@@ -1,0 +1,23 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+
+  "version": 2,
+
+  "comment": "Vercel deployment configuration for the FastAPI backend. The frontend is deployed as a separate Vercel project at posture-fitness.vercel.app.",
+
+  "rootDirectory": "backend",
+
+  "functions": {
+    "api/index.py": {
+      "runtime": "vercel-python@4.3.0",
+      "maxDuration": 10
+    }
+  },
+
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api/index"
+    }
+  ]
+}
