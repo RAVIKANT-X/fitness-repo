@@ -18,4 +18,5 @@ export const pool = new Pool({
   // Keep connections alive across serverless warm starts
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 5_000,
+  ssl: { rejectUnauthorized: true },
 })
