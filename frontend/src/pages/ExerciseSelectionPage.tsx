@@ -1,216 +1,174 @@
 /**
- * ExerciseSelectionPage — Phase 3.
+ * ExerciseSelectionPage — redesigned exercise library.
  *
- * Displays the exercise library. When the user taps an exercise:
- *  1. The exercise is stored in ExerciseContext (useSelectedExercise).
- *  2. The user is navigated to /workout.
- *
- * Phase 3 scope: exercise selection + navigation only.
- * Angle calculations and form analysis → Phase 4.
+ * Tapping a card navigates to /exercises/:id (Exercise Detail) rather than
+ * starting the workout directly. The Detail page sets the exercise context
+ * and allows the user to read the briefing before starting the camera.
  */
 
 import { useNavigate } from 'react-router-dom'
 import { ChevronRight } from 'lucide-react'
-import Card from '../components/ui/Card'
-import Button from '../components/ui/Button'
 import { EXERCISE_LIBRARY } from '../features/exercise/exerciseLibrary'
-import { useSelectedExercise } from '../hooks/useSelectedExercise'
 import type { ExerciseDefinition } from '../features/exercise/exerciseTypes'
 
-// ── Exercise category icons (inline SVG — no extra library) ──────────────────
+// ── Accent colours per exercise ───────────────────────────────────────────────
 
-function SquatIcon() {
+const ACCENTS: Record<string, { bg: string; iconBg: string; text: string; pill: string }> = {
+  squat:  {
+    bg:     'bg-green-50',
+    iconBg: 'bg-green-100',
+    text:   'text-green-700',
+    pill:   'bg-green-100 text-green-700',
+  },
+  pushup: {
+    bg:     'bg-blue-50',
+    iconBg: 'bg-blue-100',
+    text:   'text-blue-700',
+    pill:   'bg-blue-100 text-blue-700',
+  },
+  curl:   {
+    bg:     'bg-amber-50',
+    iconBg: 'bg-amber-100',
+    text:   'text-amber-700',
+    pill:   'bg-amber-100 text-amber-700',
+  },
+}
+
+const difficultyLabel: Record<string, string> = {
+  beginner:     'Beginner',
+  intermediate: 'Intermediate',
+  advanced:     'Advanced',
+}
+
+// ── Inline SVG illustrations ──────────────────────────────────────────────────
+
+function SquatSVG({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-      strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5" aria-hidden="true">
-      <circle cx="12" cy="3.5" r="1.5" />
-      <path d="M12 5.5v4M9 7l3 2.5L15 7M9 14l-2 5M15 14l2 5M8 14h8" />
+    <svg viewBox="0 0 56 56" fill="none" className={className} aria-hidden="true">
+      <circle cx="28" cy="9" r="5" fill="currentColor" opacity=".85" />
+      <path d="M28 14v12M21 19l7 7 7-7M18 33l-4 9M38 33l4 9M17 33h22"
+        stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M13 42h8M35 42h8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
     </svg>
   )
 }
 
-function PushUpIcon() {
+function PushUpSVG({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-      strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5" aria-hidden="true">
-      <circle cx="18" cy="4" r="1.5" />
-      <path d="M18 5.5v3l-3 2H5M5 10.5v3" />
-      <line x1="2" y1="13.5" x2="8" y2="13.5" />
+    <svg viewBox="0 0 56 56" fill="none" className={className} aria-hidden="true">
+      <circle cx="44" cy="11" r="5" fill="currentColor" opacity=".85" />
+      <path d="M44 16v7l-7 5H8"
+        stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M8 28v9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+      <path d="M3 37h10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
     </svg>
   )
 }
 
-function CurlIcon() {
+function CurlSVG({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-      strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5" aria-hidden="true">
-      <circle cx="12" cy="3.5" r="1.5" />
-      <path d="M12 5.5v4M9 9.5l3 1 3-1M12 10.5l-3 6" />
-      <line x1="7" y1="19.5" x2="11" y2="19.5" />
+    <svg viewBox="0 0 56 56" fill="none" className={className} aria-hidden="true">
+      <circle cx="28" cy="8" r="5" fill="currentColor" opacity=".85" />
+      <path d="M28 13v9M23 22l5 2.5 5-2.5M28 24.5l-5 14"
+        stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M20 44h8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
     </svg>
   )
 }
 
-const exerciseIcons: Record<string, () => JSX.Element> = {
-  squat: SquatIcon,
-  pushup: PushUpIcon,
-  curl: CurlIcon,
+const ILLUSTRATIONS: Record<string, typeof SquatSVG> = {
+  squat:  SquatSVG,
+  pushup: PushUpSVG,
+  curl:   CurlSVG,
 }
 
 // ── Exercise card ─────────────────────────────────────────────────────────────
 
-interface ExerciseCardProps {
-  exercise: ExerciseDefinition
-  isSelected: boolean
-  onSelect: (exercise: ExerciseDefinition) => void
-}
-
-function ExerciseCard({ exercise, isSelected, onSelect }: ExerciseCardProps) {
-  const Icon = exerciseIcons[exercise.id] ?? SquatIcon
+function ExerciseCard({ exercise, onTap }: { exercise: ExerciseDefinition; onTap: () => void }) {
+  const accent = ACCENTS[exercise.id] ?? ACCENTS.squat
+  const Illustration = ILLUSTRATIONS[exercise.id] ?? SquatSVG
 
   return (
-    <Card
-      elevated={isSelected}
+    <button
+      onClick={onTap}
       className={[
-        'cursor-pointer transition-all duration-150',
-        isSelected
-          ? 'ring-2 ring-primary border-transparent'
-          : 'hover:shadow-card-md',
+        'w-full rounded-2xl p-4 text-left',
+        'bg-surface shadow-card',
+        'active:opacity-80 transition-opacity duration-100',
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary',
       ].join(' ')}
-      onClick={() => onSelect(exercise)}
-      role="button"
-      aria-pressed={isSelected}
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') onSelect(exercise)
-      }}
+      aria-label={`View details for ${exercise.name}`}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          {/* Icon badge */}
-          <div
-            className={[
-              'w-11 h-11 rounded-xl flex items-center justify-center shrink-0 transition-colors',
-              isSelected ? 'bg-primary text-white' : 'bg-primary-light text-primary',
-            ].join(' ')}
-          >
-            <Icon />
-          </div>
-
-          {/* Text */}
-          <div>
-            <p className="font-semibold text-slate-900">{exercise.name}</p>
-            <p className="text-xs text-slate-500 mt-0.5">{exercise.description}</p>
-            {/* Muscle groups */}
-            <div className="flex flex-wrap gap-1 mt-1.5">
-              {exercise.muscleGroups.slice(0, 3).map((m) => (
-                <span
-                  key={m}
-                  className="text-[10px] bg-surface-muted text-slate-500 px-1.5 py-0.5 rounded-full"
-                >
-                  {m}
-                </span>
-              ))}
-            </div>
-          </div>
+      <div className="flex items-start gap-4">
+        {/* Illustration badge */}
+        <div className={['w-16 h-16 rounded-2xl flex items-center justify-center shrink-0', accent.iconBg].join(' ')}>
+          <Illustration className={['w-10 h-10', accent.text].join(' ')} />
         </div>
 
-        {/* Selection indicator */}
-        <div className="shrink-0 ml-3">
-          {isSelected ? (
-            <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center">
-              <svg viewBox="0 0 12 12" fill="white" className="w-3 h-3" aria-hidden="true">
-                <path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.5" fill="none"
-                  strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-          ) : (
-            <ChevronRight size={16} className="text-slate-300" aria-hidden="true" />
-          )}
+        {/* Text */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-2">
+            <p className="font-bold text-slate-900 text-base leading-tight">{exercise.name}</p>
+            <ChevronRight size={16} className="text-slate-300 shrink-0 mt-0.5" aria-hidden="true" />
+          </div>
+
+          {/* Short description */}
+          <p className="text-xs text-slate-500 mt-1 leading-relaxed line-clamp-2">
+            {exercise.shortDescription ?? exercise.description}
+          </p>
+
+          {/* Tags row */}
+          <div className="flex flex-wrap gap-1.5 mt-2.5">
+            {/* Difficulty */}
+            {exercise.difficulty && (
+              <span className={['text-[10px] font-semibold px-2 py-0.5 rounded-full', accent.pill].join(' ')}>
+                {difficultyLabel[exercise.difficulty] ?? exercise.difficulty}
+              </span>
+            )}
+            {/* Category */}
+            {exercise.category && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                {exercise.category}
+              </span>
+            )}
+            {/* Primary muscle groups (max 2) */}
+            {exercise.muscleGroups.slice(0, 2).map((m) => (
+              <span key={m} className="text-[10px] px-2 py-0.5 rounded-full bg-surface-muted text-slate-500">
+                {m}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
-    </Card>
+    </button>
   )
 }
 
-// ── Page ─────────────────────────────────────────────────────────────────────
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ExerciseSelectionPage() {
   const navigate = useNavigate()
-  const { selectedExercise, setSelectedExercise } = useSelectedExercise()
-
-  const handleSelect = (exercise: ExerciseDefinition) => {
-    setSelectedExercise(exercise)
-  }
-
-  const handleStart = () => {
-    if (selectedExercise) {
-      navigate('/workout')
-    }
-  }
 
   return (
-    <div className="space-y-5">
-      {/* ── Header ──────────────────────────────────────────────────────── */}
+    <div className="space-y-5 pt-1">
+      {/* ── Header ── */}
       <div>
-        <h2 className="text-2xl font-bold text-slate-900">Choose an Exercise</h2>
+        <h1 className="text-2xl font-bold text-slate-900">Exercises</h1>
         <p className="text-slate-500 text-sm mt-0.5">
-          Select an exercise to begin your session
+          Choose an exercise to get started
         </p>
       </div>
 
-      {/* ── Exercise cards ───────────────────────────────────────────────── */}
+      {/* ── Exercise cards ── */}
       <div className="space-y-3">
         {EXERCISE_LIBRARY.map((exercise) => (
           <ExerciseCard
             key={exercise.id}
             exercise={exercise}
-            isSelected={selectedExercise?.id === exercise.id}
-            onSelect={handleSelect}
+            onTap={() => navigate(`/exercises/${exercise.id}`)}
           />
         ))}
       </div>
-
-      {/* ── Angle info (Phase 3 detail) ──────────────────────────────────── */}
-      {selectedExercise && (
-        <Card className="bg-surface-muted">
-          <p className="text-xs font-semibold text-slate-600 mb-2">
-            Tracked angles — {selectedExercise.name}
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            {selectedExercise.primaryAngles.map((a) => (
-              <span
-                key={a.name}
-                className="text-xs bg-primary-light text-primary-dark px-2 py-0.5 rounded-full font-medium"
-              >
-                {a.name}
-              </span>
-            ))}
-          </div>
-          <p className="text-[10px] text-slate-400 mt-2">
-            {selectedExercise.requiredLandmarks.length} landmarks required for analysis
-          </p>
-        </Card>
-      )}
-
-      {/* ── Start CTA ────────────────────────────────────────────────────── */}
-      <Button
-        variant="primary"
-        fullWidth
-        disabled={!selectedExercise}
-        onClick={handleStart}
-      >
-        {selectedExercise
-          ? `Start ${selectedExercise.name}`
-          : 'Select an exercise above'}
-      </Button>
-
-      {/* ── Phase notice ─────────────────────────────────────────────────── */}
-      <Card className="border border-dashed border-slate-200 bg-surface-muted">
-        <p className="text-xs text-slate-400 text-center leading-relaxed">
-          Phase 3 — Biomechanics. Form analysis and rep counting arrive in Phase 4.
-        </p>
-      </Card>
     </div>
   )
 }

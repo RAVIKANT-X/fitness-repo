@@ -11,10 +11,9 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 
 # ── Import application Base so Alembic can see metadata ─────────────────────
-# When models are added in Phase 6, import them here so autogenerate works:
-#   from app.models.session import Session
-#   from app.models.exercise import Exercise
+# Import all ORM models here so Alembic autogenerate can detect them.
 from app.db.session import Base  # noqa: F401 — metadata needed by autogenerate
+from app.models.session import WorkoutSession  # noqa: F401
 
 # ── Alembic Config object ────────────────────────────────────────────────────
 config = context.config

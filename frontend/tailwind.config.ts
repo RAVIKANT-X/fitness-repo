@@ -15,11 +15,13 @@ const config: Config = {
           dark: '#15803d',    // green-700
         },
         // ── Backgrounds ──
-        background: '#f8fafc', // cool near-white page background
+        background: '#f4f6f8', // soft warm-neutral page background
         surface: {
           DEFAULT: '#ffffff',  // card background
-          muted: '#f1f5f9',    // subtle section background
+          muted: '#f0f2f5',    // subtle section background
         },
+        // ── Border ──
+        border: '#e5e7eb',
         // ── Semantic status ──
         success: '#22c55e',
         warning: '#f59e0b',

@@ -1,0 +1,805 @@
+
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Frontend Redesign Plan — FitCoach AI</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.65;
+    background: #f7f8fa;
+    color: #1f2328;
+  }
+
+  .page {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 40px 24px 48px;
+  }
+
+  h1 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    color: #1f2328;
+    margin-bottom: 4px;
+  }
+
+  .subtitle {
+    font-size: 13px;
+    color: #57606a;
+    margin-bottom: 36px;
+  }
+
+  h2 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1f2328;
+    margin: 36px 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #e5e7eb;
+  }
+
+  h3 {
+    font-size: 13px;
+    font-weight: 700;
+    color: #3b82d4;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 20px 0 8px;
+  }
+
+  p { margin-bottom: 10px; color: #1f2328; }
+
+  ul, ol { padding-left: 20px; margin-bottom: 10px; }
+  li { margin-bottom: 4px; color: #1f2328; }
+
+  code {
+    font-family: "SF Mono", "Cascadia Code", "Consolas", monospace;
+    font-size: 12px;
+    background: #eef0f3;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: #1f2328;
+  }
+
+  .section-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 20px 22px;
+    margin-bottom: 16px;
+  }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 20px;
+    margin: 2px;
+  }
+  .tag-green { background: #dcfce7; color: #166534; }
+  .tag-blue  { background: #dbeafe; color: #1e40af; }
+  .tag-amber { background: #fef3c7; color: #92400e; }
+  .tag-red   { background: #fee2e2; color: #991b1b; }
+  .tag-slate { background: #f1f5f9; color: #334155; }
+  .tag-purple{ background: #ede9fe; color: #5b21b6; }
+
+  .flow-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .flow-step {
+    background: #f7f8fa;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #1f2328;
+  }
+  .flow-arrow { color: #57606a; font-size: 16px; font-weight: 700; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-bottom: 12px;
+  }
+  th {
+    background: #f7f8fa;
+    border: 1px solid #e5e7eb;
+    padding: 7px 10px;
+    text-align: left;
+    font-weight: 600;
+    color: #57606a;
+  }
+  td {
+    border: 1px solid #e5e7eb;
+    padding: 7px 10px;
+    vertical-align: top;
+  }
+  tr:nth-child(even) td { background: #fafbfc; }
+
+  .status-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .status-reuse    { background: #dcfce7; color: #166534; }
+  .status-modify   { background: #fef3c7; color: #92400e; }
+  .status-new      { background: #dbeafe; color: #1e40af; }
+  .status-delete   { background: #fee2e2; color: #991b1b; }
+  .status-preserve { background: #ede9fe; color: #5b21b6; }
+
+  .palette-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .swatch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+  }
+  .swatch-color {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    border: 1px solid rgba(0,0,0,0.06);
+  }
+  .swatch-label {
+    font-size: 10px;
+    color: #57606a;
+    text-align: center;
+  }
+
+  .indent { margin-left: 20px; }
+  .note {
+    background: #fff8e1;
+    border-left: 3px solid #f59e0b;
+    padding: 10px 14px;
+    border-radius: 0 6px 6px 0;
+    font-size: 13px;
+    color: #78350f;
+    margin-bottom: 10px;
+  }
+  .callout-green {
+    background: #f0fdf4;
+    border-left: 3px solid #22c55e;
+    padding: 10px 14px;
+    border-radius: 0 6px 6px 0;
+    font-size: 13px;
+    color: #14532d;
+    margin-bottom: 10px;
+  }
+  .callout-blue {
+    background: #eff6ff;
+    border-left: 3px solid #3b82d4;
+    padding: 10px 14px;
+    border-radius: 0 6px 6px 0;
+    font-size: 13px;
+    color: #1e3a5f;
+    margin-bottom: 10px;
+  }
+
+  .scope-bar {
+    display: flex;
+    gap: 3px;
+    align-items: center;
+    margin: 4px 0;
+  }
+  .scope-block {
+    height: 12px;
+    border-radius: 2px;
+    background: #3b82d4;
+  }
+
+  footer {
+    margin-top: 48px;
+    padding-top: 16px;
+    border-top: 1px solid #e5e7eb;
+    text-align: center;
+    font-size: 12px;
+    color: #8b949e;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <h1>FitCoach AI — Frontend Redesign Plan</h1>
+  <p class="subtitle">Smartphone-first evaluation demo · No code written yet · Awaiting approval</p>
+
+  
+  <h2>A. Current Frontend Structure</h2>
+
+  <div class="section-card">
+    <h3>Routing (App.tsx)</h3>
+    <ul>
+      <li><code>/</code> → <code>HomePage</code> — welcome banner + stats placeholder grid</li>
+      <li><code>/exercises</code> → <code>ExerciseSelectionPage</code> — pick exercise, navigate to /workout</li>
+      <li><code>/workout</code> → <code>LiveWorkoutPage</code> — camera + MediaPipe + analysis engine + inline session summary</li>
+      <li><code>/session-summary</code> → <code>SessionSummaryPage</code> — standalone placeholder page (unused in live flow)</li>
+      <li><code>/progress</code> → <code>ProgressPage</code> — history placeholder</li>
+      <li><code>/profile</code> → <code>ProfilePage</code> — settings placeholder</li>
+    </ul>
+
+    <h3>Shell (Layout.tsx)</h3>
+    <ul>
+      <li>Sticky header (brand + centred page title)</li>
+      <li>Scrollable main content area with <code>pb-24</code> bottom padding</li>
+      <li>Fixed <code>BottomNav</code> — hidden at <code>md+</code> breakpoint</li>
+    </ul>
+
+    <h3>Shared Components</h3>
+    <ul>
+      <li><code>Button</code> — primary / secondary / outline, sm/md/lg, fullWidth</li>
+      <li><code>Card</code> — white surface, rounded-card (1rem), shadow, optional elevated</li>
+      <li><code>BottomNav</code> — 4 items: Home, Exercises, Progress, Profile. NavLink active state.</li>
+      <li><code>CameraView</code> — <code>&lt;video&gt;</code> with status states, mirror transform, children slot for canvas</li>
+      <li><code>PoseOverlay</code> — <code>&lt;canvas&gt;</code> skeleton renderer, mediapipe inference loop</li>
+      <li><code>WorkoutFeedback</code> — reps / phase / form / angles / deviations (purely presentational)</li>
+    </ul>
+
+    <h3>State / Hooks</h3>
+    <ul>
+      <li><code>useSelectedExercise</code> — React Context, exercise shared between ExerciseSelection → LiveWorkout</li>
+      <li><code>useCamera</code> — camera stream lifecycle</li>
+      <li><code>usePoseLandmarker</code> — MediaPipe model + inference loop</li>
+      <li><code>useAnalysis</code> — bridges analysis engine to React</li>
+    </ul>
+
+    <h3>Key Observations</h3>
+    <div class="note">
+      The session summary UI currently lives <em>inside</em> <code>LiveWorkoutPage</code> as an inline component — not in <code>/session-summary</code>. The <code>SessionSummaryPage</code> at <code>/session-summary</code> is a Phase 1 placeholder that is never navigated to by the real flow.
+    </div>
+    <div class="note">
+      There is no Exercise Details page — users go directly from exercise list → workout camera. This is the gap we are filling.
+    </div>
+  </div>
+
+  
+  <h2>B. Proposed New Route / User Flow</h2>
+
+  <div class="section-card">
+    <div class="flow-row">
+      <span class="flow-step">/ Home</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">/exercises Library</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">/exercises/:id Details</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">/workout Live</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step">/session-summary Summary</span>
+    </div>
+    <div class="flow-row">
+      <span class="flow-step">/progress</span>
+      <span style="margin-left:8px;color:#57606a">← bottom nav</span>
+    </div>
+    <div class="flow-row">
+      <span class="flow-step">/profile</span>
+      <span style="margin-left:8px;color:#57606a">← bottom nav</span>
+    </div>
+
+    <table style="margin-top:14px">
+      <tr>
+        <th>Route</th>
+        <th>Page</th>
+        <th>Change</th>
+      </tr>
+      <tr>
+        <td><code>/</code></td>
+        <td>Home Dashboard</td>
+        <td>Redesign with real greeting, activity cards, exercise quick-cards, recent session</td>
+      </tr>
+      <tr>
+        <td><code>/exercises</code></td>
+        <td>Exercise Library</td>
+        <td>Redesign as fitness-app card grid with illustrations, difficulty, muscle groups</td>
+      </tr>
+      <tr>
+        <td><code>/exercises/:id</code> <em>(new)</em></td>
+        <td>Exercise Details</td>
+        <td>New page: explanation, instructions, AI monitors, common mistakes → Start button</td>
+      </tr>
+      <tr>
+        <td><code>/workout</code></td>
+        <td>Live Workout</td>
+        <td>Redesign layout: camera-first, overlaid feedback, mobile controls</td>
+      </tr>
+      <tr>
+        <td><code>/session-summary</code></td>
+        <td>Session Summary</td>
+        <td>Replace placeholder; receive workout result via navigation state</td>
+      </tr>
+      <tr>
+        <td><code>/progress</code></td>
+        <td>Progress</td>
+        <td>Redesign with proper empty state; show real data if listSessions() returns any</td>
+      </tr>
+      <tr>
+        <td><code>/profile</code></td>
+        <td>Profile</td>
+        <td>Redesign with minimal mobile-settings look; keep placeholder sections</td>
+      </tr>
+    </table>
+
+    <div class="callout-blue">
+      <strong>New route <code>/exercises/:id</code></strong> — This is the only new route. It is a details/briefing page for each exercise that gates entry to the camera. The <code>:id</code> param is the exercise ID (<code>squat</code>, <code>pushup</code>, <code>curl</code>). The existing exercise context remains the mechanism that carries the selected exercise into LiveWorkoutPage.
+    </div>
+  </div>
+
+  
+  <h2>C. Proposed Component Hierarchy</h2>
+
+  <div class="section-card">
+    <pre style="font-size:12px;line-height:1.7;font-family:'SF Mono','Cascadia Code',monospace;color:#1f2328">
+App
+├── ExerciseProvider (context — unchanged)
+└── BrowserRouter
+    └── Routes
+        └── Layout  (shell — redesigned)
+            ├── MobileHeader  (redesigned)
+            ├── main &lt;Outlet /&gt;
+            │   ├── HomePage
+            │   │   ├── GreetingBanner
+            │   │   ├── ActivitySummary  (3 stat slots)
+            │   │   ├── ExerciseQuickCards  (horizontal scroll)
+            │   │   └── RecentSessionCard
+            │   ├── ExerciseLibraryPage  (renamed/redesigned)
+            │   │   └── ExerciseCard[] (redesigned — full info)
+            │   ├── ExerciseDetailPage  (NEW)
+            │   │   ├── ExerciseHero
+            │   │   ├── InstructionsList
+            │   │   ├── AIMonitorsList
+            │   │   ├── CommonMistakesList
+            │   │   └── StartExerciseButton
+            │   ├── LiveWorkoutPage  (camera-first redesign)
+            │   │   ├── CameraView (unchanged)
+            │   │   │   └── PoseOverlay (unchanged)
+            │   │   ├── WorkoutFeedback (redesigned — overlay-friendly)
+            │   │   └── WorkoutControls
+            │   ├── SessionSummaryPage  (redesigned — real data via nav state)
+            │   ├── ProgressPage (redesigned — real API + empty state)
+            │   └── ProfilePage (redesigned)
+            └── BottomNav  (redesigned)
+    </pre>
+  </div>
+
+  
+  <h2>D. Proposed Exercise-Detail Data Model</h2>
+
+  <div class="section-card">
+    <h3>Extended ExerciseDefinition</h3>
+    <p>We extend the existing <code>ExerciseDefinition</code> interface in <code>exerciseTypes.ts</code> with optional educational fields only. All existing biomechanics fields (<code>primaryAngles</code>, <code>requiredLandmarks</code>) remain completely unchanged.</p>
+
+    <pre style="font-size:12px;line-height:1.8;font-family:'SF Mono','Cascadia Code',monospace;background:#f7f8fa;border:1px solid #e5e7eb;border-radius:8px;padding:14px;overflow-x:auto">
+<span style="color:#57606a">// Additions to ExerciseDefinition (all optional — no breaking change)</span>
+
+shortDescription: string       <span style="color:#57606a">// 1-sentence hero text for Detail page</span>
+difficulty: 'beginner' | 'intermediate' | 'advanced'
+category: string               <span style="color:#57606a">'Strength' | 'Mobility' | 'Cardio'</span>
+
+instructions: string[]         <span style="color:#57606a">// Ordered steps for "How to perform"</span>
+commonMistakes: string[]       <span style="color:#57606a">// What to avoid — shown in Detail page</span>
+aiMonitors: string[]           <span style="color:#57606a">// What the AI checks — listed in Detail page</span>
+
+<span style="color:#57606a">// Already exists — keep unchanged:</span>
+description: string            <span style="color:#57606a">// card subtitle (one sentence)</span>
+muscleGroups: string[]         <span style="color:#57606a">// tag pills</span>
+primaryAngles: AngleDefinition[]
+requiredLandmarks: PoseLandmark[]
+    </pre>
+
+    <p>All content lives in <code>exerciseLibrary.ts</code> per exercise. The <code>ExerciseDetailPage</code> simply reads from the definition — no hard-coded strings in the UI.</p>
+
+    <h3>Example — Squat</h3>
+    <table>
+      <tr><th>Field</th><th>Value</th></tr>
+      <tr><td><code>shortDescription</code></td><td>"A foundational lower-body movement that builds strength in your quads, glutes, and core."</td></tr>
+      <tr><td><code>difficulty</code></td><td><code>beginner</code></td></tr>
+      <tr><td><code>category</code></td><td><code>Strength</code></td></tr>
+      <tr><td><code>instructions</code></td><td>1. Stand feet shoulder-width apart… 2. Brace your core… 3. Bend knees… 4. Lower until thighs parallel… 5. Push through feet to stand</td></tr>
+      <tr><td><code>commonMistakes</code></td><td>["Knees caving inward", "Shallow depth", "Rounding the lower back", "Heels lifting off the floor"]</td></tr>
+      <tr><td><code>aiMonitors</code></td><td>["Knee angle (left &amp; right)", "Hip angle", "Left/right knee symmetry", "Squat depth"]</td></tr>
+    </table>
+  </div>
+
+  
+  <h2>E. Proposed Mobile Design System</h2>
+
+  <div class="section-card">
+    <h3>Colour Palette</h3>
+    <div class="palette-row">
+      <div class="swatch">
+        <div class="swatch-color" style="background:#f4f6f8"></div>
+        <div class="swatch-label">background<br />#f4f6f8</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#ffffff;border:1px solid #e5e7eb"></div>
+        <div class="swatch-label">surface<br />#ffffff</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#f0f2f5"></div>
+        <div class="swatch-label">surface-muted<br />#f0f2f5</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#16a34a"></div>
+        <div class="swatch-label">primary<br />#16a34a</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#dcfce7"></div>
+        <div class="swatch-label">primary-light<br />#dcfce7</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#15803d"></div>
+        <div class="swatch-label">primary-dark<br />#15803d</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#22c55e"></div>
+        <div class="swatch-label">success<br />#22c55e</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#f59e0b"></div>
+        <div class="swatch-label">warning<br />#f59e0b</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#ef4444"></div>
+        <div class="swatch-label">error<br />#ef4444</div>
+      </div>
+    </div>
+    <p>The core palette is <strong>kept from the existing Tailwind config</strong> — only background shade changes slightly to <code>#f4f6f8</code> for a softer feel. No new colour tokens needed.</p>
+
+    <h3>Typography Scale</h3>
+    <table>
+      <tr><th>Role</th><th>Size</th><th>Weight</th><th>Usage</th></tr>
+      <tr><td>Hero / rep count</td><td>48–56px</td><td>800</td><td>Live rep number, session result</td></tr>
+      <tr><td>Page heading</td><td>22px</td><td>700</td><td>Page H1</td></tr>
+      <tr><td>Section heading</td><td>16px</td><td>600</td><td>Card titles</td></tr>
+      <tr><td>Body</td><td>14–15px</td><td>400</td><td>Descriptions, instructions</td></tr>
+      <tr><td>Caption / label</td><td>11–12px</td><td>500–600</td><td>Tags, status labels</td></tr>
+    </table>
+
+    <h3>Spacing &amp; Radius</h3>
+    <ul>
+      <li>Page horizontal padding: <code>px-4</code> (16px) — existing convention kept</li>
+      <li>Card radius: <code>rounded-card</code> = 1rem — existing, kept</li>
+      <li>Button radius: <code>rounded-xl</code> (12px) for primary, <code>rounded-lg</code> for secondary — existing, kept</li>
+      <li>Bottom nav items: min-height 60px (increased from 56px for comfort)</li>
+      <li>Touch targets: min 44px × 44px (WCAG minimum) — already enforced in Button</li>
+      <li>Section gap: <code>space-y-5</code> or <code>space-y-6</code> — consistent with existing</li>
+    </ul>
+
+    <h3>Exercise Card Visual Language</h3>
+    <p>Each exercise card gets a distinct colour accent and a simple CSS illustration (no external images). The icon badge grows from 44px → 60px. Cards include: name, short description, difficulty pill, muscle group tags, and a "View Details →" CTA.</p>
+
+    <ul>
+      <li><strong>Squat:</strong> warm green accent, lower-body icon</li>
+      <li><strong>Push-Up:</strong> blue accent, upper-body icon</li>
+      <li><strong>Curl:</strong> amber accent, arm icon</li>
+    </ul>
+
+    <h3>Live Workout Layout</h3>
+    <p>Camera takes <strong>full-width, 3:4 portrait ratio</strong> on mobile. Feedback panel sits below the camera in a compact horizontal strip rather than stacked cards. Controls (Finish, Switch Camera) pinned at the bottom. On desktop the camera and feedback sit side-by-side.</p>
+  </div>
+
+  
+  <h2>F. Proposed Responsive Strategy</h2>
+
+  <div class="section-card">
+    <table>
+      <tr><th>Breakpoint</th><th>Width</th><th>Strategy</th></tr>
+      <tr>
+        <td>Mobile (default)</td>
+        <td>360–430px</td>
+        <td>Single column, bottom nav, camera full-width 3:4, feedback below camera</td>
+      </tr>
+      <tr>
+        <td>Tablet (<code>sm:</code> 640px)</td>
+        <td>640–1023px</td>
+        <td>Camera switches to 16:9, exercise cards become 2-col grid</td>
+      </tr>
+      <tr>
+        <td>Desktop (<code>md:</code> 1024px+)</td>
+        <td>1024px+</td>
+        <td>Bottom nav hidden; sidebar nav added to Layout; workout page 2-col (camera left, feedback right); max-width 1024px centred</td>
+      </tr>
+    </table>
+
+    <div class="callout-blue">
+      The existing <code>Layout.tsx</code> already has <code>max-w-screen-lg mx-auto</code> and <code>md:hidden</code> on BottomNav. We keep this strategy and add a desktop sidebar nav in the Layout shell rather than stretching the mobile layout.
+    </div>
+  </div>
+
+  
+  <h2>G. Components Reused Without Change</h2>
+
+  <div class="section-card">
+    <div class="grid-2">
+      <div>
+        <span class="status-badge status-preserve">PRESERVE — NO TOUCH</span>
+        <ul style="margin-top:10px">
+          <li><code>CameraView.tsx</code></li>
+          <li><code>PoseOverlay.tsx</code></li>
+          <li><code>useCamera.ts</code></li>
+          <li><code>usePoseLandmarker.ts</code></li>
+          <li><code>useAnalysis.ts</code></li>
+          <li><code>useSelectedExercise.tsx</code></li>
+          <li><code>sessionService.ts</code></li>
+          <li>All of <code>features/analysis/</code></li>
+          <li>All of <code>features/biomechanics/</code></li>
+          <li>All of <code>features/camera/</code></li>
+          <li>All of <code>features/pose/</code></li>
+          <li>All of <code>tests/</code></li>
+        </ul>
+      </div>
+      <div>
+        <span class="status-badge status-reuse">REUSE AS-IS</span>
+        <ul style="margin-top:10px">
+          <li><code>Button.tsx</code> — no change needed</li>
+          <li><code>Card.tsx</code> — no change needed</li>
+          <li><code>tailwind.config.ts</code> — minor background tweak only</li>
+          <li><code>index.css</code> — keep existing base</li>
+          <li><code>App.tsx</code> — add one new route only</li>
+          <li><code>main.tsx</code> — unchanged</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  
+  <h2>H. Components Modified</h2>
+
+  <div class="section-card">
+    <table>
+      <tr><th>File</th><th>Change</th><th>Risk</th></tr>
+      <tr>
+        <td><code>Layout.tsx</code></td>
+        <td>Remove sticky header title; make header minimal brand-only on mobile; add desktop sidebar nav stub</td>
+        <td>Low</td>
+      </tr>
+      <tr>
+        <td><code>BottomNav.tsx</code></td>
+        <td>Taller items (60px), stronger active indicator (filled pill vs dot), softer inactive colour</td>
+        <td>Low</td>
+      </tr>
+      <tr>
+        <td><code>HomePage.tsx</code></td>
+        <td>Full redesign — greeting, 3-stat strip, horizontal exercise quick-cards, recent session (real API call to listSessions)</td>
+        <td>Low — no shared state touched</td>
+      </tr>
+      <tr>
+        <td><code>ExerciseSelectionPage.tsx</code></td>
+        <td>Renamed to ExerciseLibraryPage; richer cards; tap → navigate to /exercises/:id instead of direct workout</td>
+        <td>Low — exercise context write removed from this page</td>
+      </tr>
+      <tr>
+        <td><code>LiveWorkoutPage.tsx</code></td>
+        <td>Camera-first layout; feedback panel redesigned; Finish → navigate to /session-summary with result in nav state (replaces inline SessionSummary)</td>
+        <td>Medium — navigation change. All hooks/analysis untouched.</td>
+      </tr>
+      <tr>
+        <td><code>SessionSummaryPage.tsx</code></td>
+        <td>Replace placeholder entirely with real summary UI reading nav state; if no state, redirect to /</td>
+        <td>Low — was a placeholder</td>
+      </tr>
+      <tr>
+        <td><code>ProgressPage.tsx</code></td>
+        <td>Remove phase-notice; call listSessions(); show empty state or real session history list</td>
+        <td>Low</td>
+      </tr>
+      <tr>
+        <td><code>ProfilePage.tsx</code></td>
+        <td>Visual redesign only — same structure, new visual language; add "About" section</td>
+        <td>Low</td>
+      </tr>
+      <tr>
+        <td><code>WorkoutFeedback.tsx</code></td>
+        <td>Compact, overlay-friendly layout. Rep count dominant. Phase/form inline. Angles collapsible small row. No structural logic change.</td>
+        <td>Low — purely presentational</td>
+      </tr>
+      <tr>
+        <td><code>exerciseTypes.ts</code></td>
+        <td>Add optional fields: shortDescription, difficulty, category, instructions, commonMistakes, aiMonitors</td>
+        <td>Very Low — all optional, no breaking change</td>
+      </tr>
+      <tr>
+        <td><code>exerciseLibrary.ts</code></td>
+        <td>Populate the new optional fields for squat, pushup, curl</td>
+        <td>Very Low — data addition only</td>
+      </tr>
+      <tr>
+        <td><code>App.tsx</code></td>
+        <td>Add <code>/exercises/:id</code> route</td>
+        <td>Very Low</td>
+      </tr>
+    </table>
+  </div>
+
+  
+  <h2>I. Components Newly Created</h2>
+
+  <div class="section-card">
+    <table>
+      <tr><th>File</th><th>Purpose</th></tr>
+      <tr>
+        <td><code>pages/ExerciseDetailPage.tsx</code></td>
+        <td>New page at <code>/exercises/:id</code>. Shows exercise briefing before camera starts. Reads from exercise library data. Sets exercise in context. Navigates to /workout.</td>
+      </tr>
+    </table>
+    <p style="margin-top:8px;color:#57606a;font-size:13px">That is the only new file. Every other change is a modification to an existing file.</p>
+  </div>
+
+  
+  <h2>J. Dependencies</h2>
+
+  <div class="section-card">
+    <div class="callout-green">
+      <strong>No new dependencies required.</strong> All redesign work uses only the existing stack: React 18, React Router 6, Tailwind CSS 3, Lucide React (already installed). No UI component library, no image API, no chart library, no animation library.
+    </div>
+    <p>Lucide React is already installed and contains all icons needed for the redesign (Home, Dumbbell, TrendingUp, User, ChevronRight, Camera, etc.).</p>
+  </div>
+
+  
+  <h2>K. Preserving Camera / Analysis / Session Functionality</h2>
+
+  <div class="section-card">
+    <table>
+      <tr><th>Concern</th><th>How it is protected</th></tr>
+      <tr>
+        <td>MediaPipe / camera</td>
+        <td><code>CameraView</code> and <code>PoseOverlay</code> untouched. <code>useCamera</code> and <code>usePoseLandmarker</code> untouched.</td>
+      </tr>
+      <tr>
+        <td>Exercise context</td>
+        <td><code>useSelectedExercise</code> hook unchanged. ExerciseDetailPage calls <code>setSelectedExercise</code> on "Start Exercise" — the same pattern as before.</td>
+      </tr>
+      <tr>
+        <td>Analysis engine</td>
+        <td>All of <code>features/analysis/</code> untouched. <code>useAnalysis</code> hook untouched.</td>
+      </tr>
+      <tr>
+        <td>Rep counter / deviation detection</td>
+        <td>No changes. These live in the analysis engine — no UI coupling.</td>
+      </tr>
+      <tr>
+        <td>Session persistence</td>
+        <td><code>sessionService.ts</code> untouched. <code>handleFinishWorkout</code> logic in LiveWorkoutPage kept identical. Only change: instead of rendering inline <code>SessionSummary</code>, we <code>navigate('/session-summary', { state: workoutResult })</code>.</td>
+      </tr>
+      <tr>
+        <td>Pose skeleton overlay</td>
+        <td>Skeleton rendering is in <code>PoseOverlay</code> — untouched.</td>
+      </tr>
+    </table>
+
+    <div class="note">
+      The only navigation change in LiveWorkoutPage is the post-workout redirect: instead of showing <code>&lt;SessionSummary /&gt;</code> inline when <code>workoutResult &amp;&amp; !isActive</code>, we call <code>navigate('/session-summary', { state: workoutResult })</code>. The <code>saveSession()</code> call and all its error handling is kept exactly as-is.
+    </div>
+  </div>
+
+  
+  <h2>L. API Requirements</h2>
+
+  <div class="section-card">
+    <table>
+      <tr><th>Endpoint</th><th>Usage</th><th>Status</th></tr>
+      <tr>
+        <td><code>POST /api/v1/sessions</code></td>
+        <td>Save session after Finish Workout</td>
+        <td><span class="tag tag-green">Already used</span></td>
+      </tr>
+      <tr>
+        <td><code>GET /api/v1/sessions</code></td>
+        <td>List sessions on Progress page (empty state if none)</td>
+        <td><span class="tag tag-amber">Already exists, not yet called from UI</span></td>
+      </tr>
+      <tr>
+        <td><code>GET /api/v1/sessions/:id</code></td>
+        <td>Not needed for redesign scope</td>
+        <td><span class="tag tag-slate">Not used</span></td>
+      </tr>
+    </table>
+    <p>No new backend endpoints required. No new external APIs of any kind.</p>
+  </div>
+
+  
+  <h2>M. Estimated Implementation Scope</h2>
+
+  <div class="section-card">
+    <table>
+      <tr><th>Area</th><th>Files</th><th>Effort</th></tr>
+      <tr>
+        <td>Exercise data model extension</td>
+        <td><code>exerciseTypes.ts</code>, <code>exerciseLibrary.ts</code></td>
+        <td><span class="tag tag-green">Small</span></td>
+      </tr>
+      <tr>
+        <td>App routing (+1 route)</td>
+        <td><code>App.tsx</code></td>
+        <td><span class="tag tag-green">Tiny</span></td>
+      </tr>
+      <tr>
+        <td>Layout &amp; shell redesign</td>
+        <td><code>Layout.tsx</code>, <code>BottomNav.tsx</code></td>
+        <td><span class="tag tag-green">Small</span></td>
+      </tr>
+      <tr>
+        <td>Home page redesign</td>
+        <td><code>HomePage.tsx</code></td>
+        <td><span class="tag tag-blue">Medium</span></td>
+      </tr>
+      <tr>
+        <td>Exercise library redesign</td>
+        <td><code>ExerciseSelectionPage.tsx</code></td>
+        <td><span class="tag tag-blue">Medium</span></td>
+      </tr>
+      <tr>
+        <td>Exercise detail page (new)</td>
+        <td><code>ExerciseDetailPage.tsx</code></td>
+        <td><span class="tag tag-blue">Medium</span></td>
+      </tr>
+      <tr>
+        <td>Live workout layout</td>
+        <td><code>LiveWorkoutPage.tsx</code></td>
+        <td><span class="tag tag-blue">Medium</span></td>
+      </tr>
+      <tr>
+        <td>WorkoutFeedback redesign</td>
+        <td><code>WorkoutFeedback.tsx</code></td>
+        <td><span class="tag tag-green">Small</span></td>
+      </tr>
+      <tr>
+        <td>Session Summary redesign</td>
+        <td><code>SessionSummaryPage.tsx</code></td>
+        <td><span class="tag tag-green">Small</span></td>
+      </tr>
+      <tr>
+        <td>Progress page redesign</td>
+        <td><code>ProgressPage.tsx</code></td>
+        <td><span class="tag tag-green">Small</span></td>
+      </tr>
+      <tr>
+        <td>Profile page redesign</td>
+        <td><code>ProfilePage.tsx</code></td>
+        <td><span class="tag tag-green">Small</span></td>
+      </tr>
+      <tr>
+        <td>Tailwind token tweaks</td>
+        <td><code>tailwind.config.ts</code>, <code>index.css</code></td>
+        <td><span class="tag tag-green">Tiny</span></td>
+      </tr>
+    </table>
+
+    <p><strong>Total scope:</strong> ~13 files modified, 1 file created. No new dependencies. All existing tests remain valid because the analysis engine and service layer are untouched.</p>
+
+    <div class="callout-green">
+      <strong>Zero regression risk areas:</strong> analysis engine, biomechanics, pose detection, camera hooks, session service, all existing tests. These are entirely read-only from the redesign's perspective.
+    </div>
+  </div>
+
+  <footer>Made with IBM Bob</footer>
+</div>
+</body>
+</html>

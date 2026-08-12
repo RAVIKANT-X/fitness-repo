@@ -17,6 +17,9 @@
 import type { AngleDefinition } from '../biomechanics/biomechanicsTypes'
 import type { PoseLandmark } from '../biomechanics/landmarkMapping'
 
+export type ExerciseDifficulty = 'beginner' | 'intermediate' | 'advanced'
+export type ExerciseCategory = 'Strength' | 'Mobility' | 'Cardio'
+
 export interface ExerciseDefinition {
   /** URL-safe unique identifier (e.g. "squat", "pushup", "curl"). */
   id: string
@@ -43,4 +46,28 @@ export interface ExerciseDefinition {
    * angle calculations — if any are occluded, the frame is skipped.
    */
   requiredLandmarks: PoseLandmark[]
+
+  // ── Educational / UI fields (all optional — no breaking change) ──────────
+
+  /** Slightly longer hero text for the Exercise Detail page. */
+  shortDescription?: string
+
+  /** Perceived difficulty level — shown as a pill on exercise cards. */
+  difficulty?: ExerciseDifficulty
+
+  /** Broad movement category. */
+  category?: ExerciseCategory
+
+  /** Ordered step-by-step instructions for performing the exercise. */
+  instructions?: string[]
+
+  /** Common form mistakes to watch out for. */
+  commonMistakes?: string[]
+
+  /**
+   * What the AI coach actively monitors during this exercise.
+   * Sourced from the biomechanical angle definitions — kept as human-readable
+   * strings so the Detail page doesn't need to parse AngleDefinition objects.
+   */
+  aiMonitors?: string[]
 }
