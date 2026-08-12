@@ -9,6 +9,9 @@
 # in the Railway dashboard — never stored here.
 
 [build]
+# Force Dockerfile builder — Railway should detect the Dockerfile
+# automatically, but this makes it explicit.
+builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
