@@ -117,6 +117,7 @@ export type ActiveArm = 'LEFT' | 'RIGHT' | 'BILATERAL' | 'NONE'
  *   repDeviations    — deviations accumulated during the current rep cycle
  *   minAngleDuringCycle  — deepest angle observed since the rep started (degrees)
  *   maxAngleDuringCycle  — most extended angle observed since the rep started
+ *   depthDwellFrames — frames spent at depth (BOTTOM/PEAK) since DEPTH was entered
  *   activeArm        — for curl: which arm is being tracked
  *   shoulderBaseline — for curl: initial shoulder angle(s) captured at EXTENDED
  *   lastCompletedRepDeviations — deviations from the most recently completed rep
@@ -131,6 +132,12 @@ export interface AnalysisState {
   minAngleDuringCycle: number
   /** Maximum joint angle observed during the current rep cycle (most extended). */
   maxAngleDuringCycle: number
+  /**
+   * Frames spent at depth (BOTTOM / PEAK) since RepCycleState entered DEPTH.
+   * Used to enforce DWELL_FRAMES_DEPTH — prevents a single-frame pass-through
+   * from triggering RETURNING.
+   */
+  depthDwellFrames: number
   /** Curl-specific: which arm is actively being tracked. */
   activeArm: ActiveArm
   /** Curl-specific: shoulder angle at the start position (baseline). */
@@ -177,6 +184,7 @@ export function createInitialAnalysisState(): AnalysisState {
     repDeviations: [],
     minAngleDuringCycle: Infinity,
     maxAngleDuringCycle: -Infinity,
+    depthDwellFrames: 0,
     activeArm: 'NONE',
     shoulderBaseline: null,
     lastCompletedRepDeviations: [],

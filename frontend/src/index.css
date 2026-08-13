@@ -62,9 +62,13 @@
 
   /*
    * Camera page root — used by LiveWorkoutPage, CalibrationPage, ScanYourSpacePage.
-   * Takes the full dynamic viewport height and lays out as a flex column so
-   * the camera section fills exactly the available space without overflowing
-   * behind the fixed BottomNav.
+   *
+   * Architecture:
+   *   The page is a flex column filling exactly 100dvh.
+   *   The BottomNav is fixed at the bottom — we DO NOT rely on margins to dodge it.
+   *   Instead, .camera-controls reserves real padding-bottom equal to the
+   *   navbar height + safe area inset so the controls always sit above the nav.
+   *   The camera section (flex:1) fills whatever is left between header and controls.
    *
    * Usage: add class="camera-page" to the outermost div of a camera page.
    */
@@ -72,6 +76,8 @@
     display: flex;
     flex-direction: column;
     /* dvh = dynamic viewport height — shrinks when browser chrome appears */
+    min-height: 100dvh;
+    min-height: 100vh; /* fallback */
     height: 100dvh;
     height: 100vh; /* fallback for older browsers */
     /* Escape the Layout <main> padding so we fill edge-to-edge */
@@ -88,26 +94,40 @@
     z-index: 10;
   }
 
-  /* The camera section grows to fill all available space between header and controls */
+  /*
+   * The camera section grows to fill all available space between header and controls.
+   * min-height: 0 is required so it can shrink below its content height in flex.
+   */
   .camera-section {
     flex: 1 1 0;
-    min-height: 0;       /* allow flex child to shrink below content size */
+    min-height: 0;
     overflow: hidden;
     position: relative;
     z-index: 1;
   }
 
   /*
-   * Controls bar below the camera.
-   * Adds safe-area padding so content is never hidden under the navbar or
-   * the Android system gesture bar.
-   * z-index 10 keeps it above the camera stacking context.
+   * Controls bar below the camera — sits BETWEEN the camera and the BottomNav.
+   *
+   * Padding strategy (NO random margins):
+   *   padding-bottom reserves exactly (BottomNav height + device safe area).
+   *   This means the last button in the controls area is always fully visible
+   *   above the glassmorphism nav pill, on every device including Android
+   *   gesture-bar phones and notched iPhones.
+   *
+   * z-index 20 ensures this bar sits above both camera stacking context (z:1)
+   * and any absolute overlays inside .camera-section (z:10).
    */
   .camera-controls {
     flex-shrink: 0;
-    z-index: 10;
-    /* Push content above the fixed BottomNav + Android safe area */
-    padding-bottom: calc(var(--nav-height) + max(var(--safe-bottom), 8px));
+    z-index: 20;
+    /*
+     * Reserve space above BottomNav:
+     *   --nav-height  = 64px  (pill height including its own padding)
+     *   --safe-bottom = env(safe-area-inset-bottom, 0px)
+     *   extra 4px     = small breathing gap above the pill
+     */
+    padding-bottom: calc(var(--nav-height) + max(var(--safe-bottom), 4px) + 4px);
   }
 
   /* Hide scrollbar but keep scroll behaviour (for filter pills etc.) */

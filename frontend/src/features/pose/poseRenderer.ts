@@ -1,6 +1,18 @@
 /**
  * Pose renderer — draws landmarks and skeleton connections onto a canvas.
  *
+ * Refinements (v2):
+ *  - Connections are colour-coded by the minimum visibility of their two endpoints:
+ *      high (≥ 0.75):  sky-blue  (crisp, fully tracked)
+ *      mid  (≥ 0.50):  green     (reliable)
+ *      low  (< 0.50):  hidden    (below MIN_VISIBILITY — not drawn)
+ *  - Landmark dots are filled with a colour that reflects visibility:
+ *      high: sky-blue with white border
+ *      mid:  green with white border
+ *  - Connection stroke width is slightly increased for visibility on mobile.
+ *  - Body-part grouping: torso connections are drawn slightly thicker than limb
+ *    connections to anchor the skeleton visually.
+ *
  * Coordinate system contract:
  *  - MediaPipe normalised landmarks are in [0..1] x [0..1] image space
  *    where (0,0) is the TOP-LEFT of the VIDEO frame as captured.
@@ -37,17 +49,41 @@ export const POSE_CONNECTIONS: [number, number][] = [
   [24, 26], [26, 28], [28, 30], [28, 32], [30, 32],
 ]
 
+// Torso connections drawn thicker as the skeleton anchor
+const TORSO_CONNECTIONS = new Set<string>(['11,12', '11,23', '12,24', '23,24'])
+
 // ── Drawing style constants ───────────────────────────────────────────────────
-const LANDMARK_RADIUS = 5
-const LANDMARK_COLOR = '#16a34a'        // primary green — matches design system
-const LANDMARK_BORDER_COLOR = '#ffffff'
+
+/** Landmark dot radius */
+const LANDMARK_RADIUS = 4.5
 const LANDMARK_BORDER_WIDTH = 1.5
 
-const CONNECTION_COLOR = 'rgba(22, 163, 74, 0.75)' // semi-transparent green
-const CONNECTION_WIDTH = 2.5
+/** Connection stroke widths */
+const CONNECTION_WIDTH_TORSO = 3.0
+const CONNECTION_WIDTH_LIMB  = 2.0
 
 /** Minimum visibility score to render a landmark/connection. */
-const MIN_VISIBILITY = 0.5
+const MIN_VISIBILITY = 0.50
+
+/** Visibility threshold above which a landmark is "high confidence" */
+const HIGH_VISIBILITY = 0.75
+
+// Colour palette
+const COLOR_HIGH     = 'rgba(56, 189, 248, 1.00)'    // sky-400 — high confidence
+const COLOR_MID      = 'rgba(34, 197,  94, 0.85)'    // green-500 — mid confidence
+const COLOR_HIGH_T   = 'rgba(56, 189, 248, 0.55)'    // translucent high — connections
+const COLOR_MID_T    = 'rgba(34, 197,  94, 0.55)'    // translucent mid — connections
+const COLOR_BORDER   = 'rgba(255, 255, 255, 0.90)'   // white border
+
+function connectionColor(visA: number, visB: number): string | null {
+  const minVis = Math.min(visA, visB)
+  if (minVis < MIN_VISIBILITY) return null  // skip
+  return minVis >= HIGH_VISIBILITY ? COLOR_HIGH_T : COLOR_MID_T
+}
+
+function landmarkFillColor(vis: number): string {
+  return vis >= HIGH_VISIBILITY ? COLOR_HIGH : COLOR_MID
+}
 
 /**
  * Renders pose landmarks and skeleton onto the provided canvas context.
@@ -66,9 +102,6 @@ export function renderPose(
   ctx.clearRect(0, 0, width, height)
 
   // Apply mirror transform if needed (front camera).
-  // We translate to the right edge, flip horizontally, then draw normally.
-  // This makes landmark x=0 render on the RIGHT side of the canvas,
-  // matching the mirrored video.
   ctx.save()
   if (mirrored) {
     ctx.translate(width, 0)
@@ -76,8 +109,6 @@ export function renderPose(
   }
 
   // ── Draw connections ──────────────────────────────────────────────────────
-  ctx.lineWidth = CONNECTION_WIDTH
-  ctx.strokeStyle = CONNECTION_COLOR
   ctx.lineCap = 'round'
 
   for (const [a, b] of POSE_CONNECTIONS) {
@@ -85,10 +116,16 @@ export function renderPose(
     const lmB = landmarks[b]
     if (!lmA || !lmB) continue
 
-    // Skip low-confidence connections
     const visA = lmA.visibility ?? 1
     const visB = lmB.visibility ?? 1
-    if (visA < MIN_VISIBILITY || visB < MIN_VISIBILITY) continue
+    const color = connectionColor(visA, visB)
+    if (!color) continue
+
+    const key = `${a},${b}`
+    const isTorso = TORSO_CONNECTIONS.has(key)
+
+    ctx.lineWidth = isTorso ? CONNECTION_WIDTH_TORSO : CONNECTION_WIDTH_LIMB
+    ctx.strokeStyle = color
 
     ctx.beginPath()
     ctx.moveTo(lmA.x * width, lmA.y * height)
@@ -107,13 +144,13 @@ export function renderPose(
     // White border for contrast against dark and light backgrounds
     ctx.beginPath()
     ctx.arc(px, py, LANDMARK_RADIUS + LANDMARK_BORDER_WIDTH, 0, Math.PI * 2)
-    ctx.fillStyle = LANDMARK_BORDER_COLOR
+    ctx.fillStyle = COLOR_BORDER
     ctx.fill()
 
-    // Green fill
+    // Confidence-tinted fill
     ctx.beginPath()
     ctx.arc(px, py, LANDMARK_RADIUS, 0, Math.PI * 2)
-    ctx.fillStyle = LANDMARK_COLOR
+    ctx.fillStyle = landmarkFillColor(vis)
     ctx.fill()
   }
 

@@ -31,34 +31,39 @@ describe('stepSquatRepCounter — complete rep', () => {
     let totalCount = 0
 
     // Phase: STANDING (idle)
-    let out = stepSquatRepCounter(state, 'UNKNOWN', 'STANDING', min, max, 160)
+    let out = stepSquatRepCounter(state, 'UNKNOWN', 'STANDING', min, max, 160, 0)
     state = out.nextCycleState
     min = out.nextMin
     max = out.nextMax
     expect(state).toBe('IDLE')
 
     // Phase: DESCENDING
-    out = stepSquatRepCounter(state, 'STANDING', 'DESCENDING', min, max, 135)
+    out = stepSquatRepCounter(state, 'STANDING', 'DESCENDING', min, max, 135, 0)
     state = out.nextCycleState; min = out.nextMin; max = out.nextMax
     expect(state).toBe('STARTED')
 
-    // Phase: BOTTOM
-    out = stepSquatRepCounter(state, 'DESCENDING', 'BOTTOM', min, max, 105)
+    // Phase: BOTTOM (first frame — dwell=1)
+    out = stepSquatRepCounter(state, 'DESCENDING', 'BOTTOM', min, max, 105, 0)
     state = out.nextCycleState; min = out.nextMin; max = out.nextMax
     expect(state).toBe('DEPTH')
 
-    // Phase: ASCENDING
-    out = stepSquatRepCounter(state, 'BOTTOM', 'ASCENDING', min, max, 120)
+    // Phase: BOTTOM (second frame — dwell reaches 2, satisfies DWELL_FRAMES_DEPTH)
+    out = stepSquatRepCounter(state, 'BOTTOM', 'BOTTOM', min, max, 105, out.nextDwell)
+    state = out.nextCycleState; min = out.nextMin; max = out.nextMax
+    expect(state).toBe('DEPTH')
+
+    // Phase: ASCENDING — now dwell >= 2, should advance to RETURNING
+    out = stepSquatRepCounter(state, 'BOTTOM', 'ASCENDING', min, max, 120, out.nextDwell)
     state = out.nextCycleState; min = out.nextMin; max = out.nextMax
     expect(state).toBe('RETURNING')
 
     // Phase: STANDING — rep completes
-    out = stepSquatRepCounter(state, 'ASCENDING', 'STANDING', min, max, 160)
+    out = stepSquatRepCounter(state, 'ASCENDING', 'STANDING', min, max, 160, 0)
     state = out.nextCycleState; min = out.nextMin; max = out.nextMax
     expect(state).toBe('COMPLETE')
 
     // COMPLETE fires count
-    out = stepSquatRepCounter(state, 'STANDING', 'STANDING', min, max, 160)
+    out = stepSquatRepCounter(state, 'STANDING', 'STANDING', min, max, 160, 0)
     totalCount += out.countDelta
     state = out.nextCycleState; min = out.nextMin; max = out.nextMax
     expect(out.countDelta).toBe(1)
@@ -73,12 +78,12 @@ describe('stepSquatRepCounter — partial squat (no BOTTOM)', () => {
     let min = Infinity; let max = -Infinity
 
     // Start descending
-    let out = stepSquatRepCounter(state, 'STANDING', 'DESCENDING', min, max, 135)
+    let out = stepSquatRepCounter(state, 'STANDING', 'DESCENDING', min, max, 135, 0)
     state = out.nextCycleState; min = out.nextMin; max = out.nextMax
     expect(state).toBe('STARTED')
 
     // Return to standing without reaching bottom
-    out = stepSquatRepCounter(state, 'DESCENDING', 'STANDING', min, max, 160)
+    out = stepSquatRepCounter(state, 'DESCENDING', 'STANDING', min, max, 160, 0)
     state = out.nextCycleState; min = out.nextMin; max = out.nextMax
     expect(state).toBe('IDLE')
     expect(out.countDelta).toBe(0)
@@ -89,7 +94,7 @@ describe('stepSquatRepCounter — INVALID phase does not advance state', () => {
   it('preserves cycle state on INVALID phase', () => {
     // Simulate mid-rep interruption
     let state: RepCycleState = 'DEPTH'
-    let out = stepSquatRepCounter(state, 'BOTTOM', 'INVALID', 105, 160, null)
+    let out = stepSquatRepCounter(state, 'BOTTOM', 'INVALID', 105, 160, null, 0)
     expect(out.nextCycleState).toBe('DEPTH')
     expect(out.countDelta).toBe(0)
   })
@@ -103,7 +108,7 @@ describe('stepSquatRepCounter — does not double count from jitter at STANDING'
 
     // Multiple transitions that don't go below STANDING threshold
     for (let i = 0; i < 10; i++) {
-      const out = stepSquatRepCounter(state, 'STANDING', 'STANDING', min, max, 160)
+      const out = stepSquatRepCounter(state, 'STANDING', 'STANDING', min, max, 160, 0)
       state = out.nextCycleState
       count += out.countDelta
     }
@@ -124,21 +129,25 @@ describe('stepSquatRepCounter — Phase 4.5: good depth squat (108°)', () => {
     let state: RepCycleState = 'IDLE'
     let min = Infinity
     let max = -Infinity
+    let dwell = 0
     let totalCount = 0
 
+    // Two BOTTOM frames to satisfy DWELL_FRAMES_DEPTH=2 before ASCENDING
     const steps: Array<[MovementPhase, number]> = [
       ['STANDING',   165],
       ['DESCENDING', 140],
-      ['BOTTOM',     108],  // 108 < BOTTOM_ENTER=130, min tracked
+      ['BOTTOM',     108],  // BOTTOM frame 1
+      ['BOTTOM',     108],  // BOTTOM frame 2 — satisfies dwell
       ['ASCENDING',  150],
       ['STANDING',   165],
     ]
 
     for (const [phase, angle] of steps) {
-      const out = stepSquatRepCounter(state, 'UNKNOWN', phase, min, max, angle)
+      const out = stepSquatRepCounter(state, 'UNKNOWN', phase, min, max, angle, dwell)
       state = out.nextCycleState
       min = out.nextMin
       max = out.nextMax
+      dwell = out.nextDwell
       totalCount += out.countDelta
     }
 
@@ -147,7 +156,7 @@ describe('stepSquatRepCounter — Phase 4.5: good depth squat (108°)', () => {
     expect(min).toBe(108)
 
     // Fire COMPLETE
-    const out = stepSquatRepCounter(state, 'STANDING', 'STANDING', min, max, 165)
+    const out = stepSquatRepCounter(state, 'STANDING', 'STANDING', min, max, 165, 0)
     totalCount += out.countDelta
     expect(out.countDelta).toBe(1)
     expect(totalCount).toBe(1)
@@ -156,39 +165,35 @@ describe('stepSquatRepCounter — Phase 4.5: good depth squat (108°)', () => {
 
 describe('stepSquatRepCounter — Phase 4.5: shallow completed squat (128°)', () => {
   /**
-   * With BOTTOM_ENTER=130: 128° < 130 → enters BOTTOM → rep counts
-   * min angle = 128 > MIN_DEPTH_REQUIRED=115 → caller should flag DEPTH_TOO_SHALLOW
+   * With BOTTOM_ENTER=120: 128° is now ABOVE BOTTOM_ENTER → BOTTOM is never reached.
+   * This test verifies the counter stays STARTED and returns 0 reps.
+   * (BOTTOM_ENTER was tightened from 130° to 120° in v2 thresholds.)
    */
-  it('completes a rep and tracks min=128 for a shallow squat', () => {
+  it('does not count a rep when squat only reaches 128° (above BOTTOM_ENTER=120°)', () => {
     let state: RepCycleState = 'IDLE'
     let min = Infinity
     let max = -Infinity
+    let dwell = 0
     let totalCount = 0
 
     const steps: Array<[MovementPhase, number]> = [
       ['STANDING',   165],
       ['DESCENDING', 140],
-      ['BOTTOM',     128],  // 128 < BOTTOM_ENTER=130 → BOTTOM confirmed; min=128 > 115
-      ['ASCENDING',  150],
-      ['STANDING',   165],
+      ['DESCENDING', 128],  // 128 > BOTTOM_ENTER=120 → stays DESCENDING
+      ['STANDING',   165],  // returns without depth
     ]
 
     for (const [phase, angle] of steps) {
-      const out = stepSquatRepCounter(state, 'UNKNOWN', phase, min, max, angle)
+      const out = stepSquatRepCounter(state, 'UNKNOWN', phase, min, max, angle, dwell)
       state = out.nextCycleState
       min = out.nextMin
       max = out.nextMax
+      dwell = out.nextDwell
       totalCount += out.countDelta
     }
 
-    expect(state).toBe('COMPLETE')
-    // min should be 128 — shallow but tracked correctly
-    expect(min).toBe(128)
-
-    const out = stepSquatRepCounter(state, 'STANDING', 'STANDING', min, max, 165)
-    totalCount += out.countDelta
-    expect(out.countDelta).toBe(1)
-    expect(totalCount).toBe(1)
+    expect(state).toBe('IDLE')
+    expect(totalCount).toBe(0)
   })
 })
 
@@ -202,17 +207,17 @@ describe('stepSquatRepCounter — Phase 4.5: incomplete squat (140° — never e
     let max = -Infinity
 
     // Descend to 140° then return — never crosses 130°
-    let out = stepSquatRepCounter(state, 'STANDING', 'DESCENDING', min, max, 140)
+    let out = stepSquatRepCounter(state, 'STANDING', 'DESCENDING', min, max, 140, 0)
     state = out.nextCycleState; min = out.nextMin; max = out.nextMax
     expect(state).toBe('STARTED')
 
     // Stays DESCENDING with angle 140 — no BOTTOM
-    out = stepSquatRepCounter(state, 'DESCENDING', 'DESCENDING', min, max, 140)
+    out = stepSquatRepCounter(state, 'DESCENDING', 'DESCENDING', min, max, 140, 0)
     state = out.nextCycleState; min = out.nextMin; max = out.nextMax
     expect(state).toBe('STARTED')
 
     // Returns to standing
-    out = stepSquatRepCounter(state, 'DESCENDING', 'STANDING', min, max, 165)
+    out = stepSquatRepCounter(state, 'DESCENDING', 'STANDING', min, max, 165, 0)
     expect(out.nextCycleState).toBe('IDLE')
     expect(out.countDelta).toBe(0)
   })
@@ -230,7 +235,7 @@ describe('stepSquatRepCounter — Phase 4.5: threshold jitter at BOTTOM boundary
     // Oscillate between 128 and 132 — below BOTTOM_EXIT=145, so stays BOTTOM
     const angles = [128, 131, 129, 132, 128]
     for (const angle of angles) {
-      const out = stepSquatRepCounter(state, 'BOTTOM', 'BOTTOM', Infinity, -Infinity, angle)
+      const out = stepSquatRepCounter(state, 'BOTTOM', 'BOTTOM', Infinity, -Infinity, angle, 0)
       state = out.nextCycleState
       count += out.countDelta
     }
@@ -259,7 +264,7 @@ describe('stepPushUpRepCounter — complete rep', () => {
     ]
 
     for (const [phase, angle] of steps) {
-      const out = stepPushUpRepCounter(state, 'UNKNOWN', phase, min, max, angle)
+      const out = stepPushUpRepCounter(state, 'UNKNOWN', phase, min, max, angle, 0)
       state = out.nextCycleState
       min = out.nextMin
       max = out.nextMax
@@ -270,7 +275,7 @@ describe('stepPushUpRepCounter — complete rep', () => {
     expect(state).toBe('COMPLETE')
 
     // Fire COMPLETE
-    const out = stepPushUpRepCounter(state, 'TOP', 'TOP', min, max, 160)
+    const out = stepPushUpRepCounter(state, 'TOP', 'TOP', min, max, 160, 0)
     totalCount += out.countDelta
     expect(totalCount).toBe(1)
     expect(out.nextCycleState).toBe('IDLE')
@@ -283,11 +288,11 @@ describe('stepPushUpRepCounter — partial push-up (no BOTTOM)', () => {
     let min = Infinity; let max = -Infinity
 
     // Descend a bit then return
-    let out = stepPushUpRepCounter(state, 'TOP', 'DESCENDING', min, max, 120)
+    let out = stepPushUpRepCounter(state, 'TOP', 'DESCENDING', min, max, 120, 0)
     state = out.nextCycleState; min = out.nextMin; max = out.nextMax
     expect(state).toBe('STARTED')
 
-    out = stepPushUpRepCounter(state, 'DESCENDING', 'TOP', min, max, 160)
+    out = stepPushUpRepCounter(state, 'DESCENDING', 'TOP', min, max, 160, 0)
     state = out.nextCycleState
     expect(state).toBe('IDLE')
     expect(out.countDelta).toBe(0)
@@ -296,7 +301,7 @@ describe('stepPushUpRepCounter — partial push-up (no BOTTOM)', () => {
 
 describe('stepPushUpRepCounter — INVALID does not advance', () => {
   it('preserves DEPTH state through INVALID frames', () => {
-    const out = stepPushUpRepCounter('DEPTH', 'BOTTOM', 'INVALID', 70, 160, null)
+    const out = stepPushUpRepCounter('DEPTH', 'BOTTOM', 'INVALID', 70, 160, null, 0)
     expect(out.nextCycleState).toBe('DEPTH')
     expect(out.countDelta).toBe(0)
   })
@@ -319,7 +324,7 @@ describe('stepCurlRepCounter — complete rep', () => {
     ]
 
     for (const [phase, angle] of steps) {
-      const out = stepCurlRepCounter(state, 'UNKNOWN', phase, min, max, angle)
+      const out = stepCurlRepCounter(state, 'UNKNOWN', phase, min, max, angle, 0)
       state = out.nextCycleState
       min = out.nextMin
       max = out.nextMax
@@ -328,7 +333,7 @@ describe('stepCurlRepCounter — complete rep', () => {
 
     expect(state).toBe('COMPLETE')
 
-    const out = stepCurlRepCounter(state, 'EXTENDED', 'EXTENDED', min, max, 160)
+    const out = stepCurlRepCounter(state, 'EXTENDED', 'EXTENDED', min, max, 160, 0)
     totalCount += out.countDelta
     expect(totalCount).toBe(1)
     expect(out.nextCycleState).toBe('IDLE')
@@ -341,12 +346,12 @@ describe('stepCurlRepCounter — partial curl (no PEAK)', () => {
     let min = Infinity; let max = -Infinity
 
     // Start curling
-    let out = stepCurlRepCounter(state, 'EXTENDED', 'CURLING', min, max, 110)
+    let out = stepCurlRepCounter(state, 'EXTENDED', 'CURLING', min, max, 110, 0)
     state = out.nextCycleState; min = out.nextMin; max = out.nextMax
     expect(state).toBe('STARTED')
 
     // Return without reaching PEAK
-    out = stepCurlRepCounter(state, 'CURLING', 'EXTENDED', min, max, 160)
+    out = stepCurlRepCounter(state, 'CURLING', 'EXTENDED', min, max, 160, 0)
     state = out.nextCycleState
     expect(state).toBe('IDLE')
     expect(out.countDelta).toBe(0)
@@ -355,7 +360,7 @@ describe('stepCurlRepCounter — partial curl (no PEAK)', () => {
 
 describe('stepCurlRepCounter — INVALID does not advance', () => {
   it('preserves DEPTH state when phase is INVALID', () => {
-    const out = stepCurlRepCounter('DEPTH', 'PEAK', 'INVALID', 55, 160, null)
+    const out = stepCurlRepCounter('DEPTH', 'PEAK', 'INVALID', 55, 160, null, 0)
     expect(out.nextCycleState).toBe('DEPTH')
     expect(out.countDelta).toBe(0)
   })
@@ -370,7 +375,7 @@ describe('stepCurlRepCounter — threshold jitter at PEAK', () => {
     // Oscillate around 60° (just above and below PEAK_EXIT=75) — but stay below exit
     const angles = [58, 62, 59, 63, 57]
     for (const angle of angles) {
-      const out = stepCurlRepCounter(state, 'PEAK', 'PEAK', Infinity, -Infinity, angle)
+      const out = stepCurlRepCounter(state, 'PEAK', 'PEAK', Infinity, -Infinity, angle, 0)
       state = out.nextCycleState
       count += out.countDelta
     }

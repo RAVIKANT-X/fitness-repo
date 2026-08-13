@@ -1,31 +1,34 @@
 /**
- * ScanYourSpacePage — fully-automatic workspace + posture scan powered by Gemini Vision.
+ * ScanYourSpacePage — click a photo or upload one, then get AI coaching.
  *
  * ── User flow ──────────────────────────────────────────────────────────────────
- *  1. User taps "Scan Your Space" on Home
- *  2. Permission screen appears (one-time camera consent notice)
- *  3. User taps "Scan Your Space →"  ← ONLY button the user ever taps
- *  4. Front camera opens, live preview starts
- *  5. App waits silently for a stable, valid frame:
- *       • Human detected (MediaPipe pose or brightness heuristic)
- *       • Frame brightness within acceptable range
- *       • N stable frames in a row
- *  6. One JPEG frame is captured from <video> via <canvas>
- *  7. Frame sent to Gemini Vision API (direct browser → Gemini)
- *  8. Structured suggestions render as glass overlays on the live camera
- *  9. Optional TTS reads the top action aloud
- * 10. "Rescan" button lets the user trigger a new capture
+ *  1. Landing screen — two options:
+ *       [📷 Take Photo]   opens camera live preview
+ *       [🖼 Upload Photo] opens native file picker
+ *  2. Camera mode: full-screen live preview with a large shutter button
+ *       • Human validation still runs (pose model)
+ *       • Camera-switch button top-right
+ *       • Tap shutter → captures frame → Gemini analyse
+ *  3. Upload mode: user picks image → preview → Gemini analyse
+ *  4. Analysing: pulsing overlay while waiting for Gemini
+ *  5. Result: score header + swipeable flashcard deck (5–8 cards)
+ *       • Each card: category badge, headline, detail, action pill
+ *       • Swipe left/right or tap arrows
+ *       • Bottom progress dots
+ *  6. Actions: "Rescan", "Try Exercise", "Share"
  *
- * No Capture / Analyze / Scan button is shown during operation.
- * On-device pose analysis continues in parallel for continuous posture monitoring.
+ * Preserved from original:
+ *   HumanValidation, TTS voice coach, camera switch, pose skeleton,
+ *   multiple-human rejection, activity detection, on-device posture tracking.
  */
 
-import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
+import { useRef, useEffect, useState, useCallback, useMemo, useId } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  ArrowLeft, FlipHorizontal, Volume2, VolumeX,
-  Camera, ScanLine, RotateCcw, CheckCircle, AlertTriangle,
-  Sparkles, Loader2,
+  ArrowLeft, Volume2, VolumeX, Camera, ScanLine,
+  RotateCcw, CheckCircle, AlertTriangle, Sparkles,
+  Loader2, ChevronLeft, ChevronRight, Upload, Image,
+  Zap,
 } from 'lucide-react'
 import { useCamera }          from '../hooks/useCamera'
 import { usePoseLandmarker }  from '../hooks/usePoseLandmarker'
@@ -36,6 +39,7 @@ import {
   getValidationTtsMessage,
 } from '../features/camera/humanValidation'
 import HumanValidationOverlay from '../components/workout/HumanValidationOverlay'
+import CameraSwitchButton from '../components/workout/CameraSwitchButton'
 import { analyseWorkspaceFrame } from '../services/geminiVision'
 import { analysePosture }        from '../features/scanSpace/postureAnalysis'
 import { recogniseActivity, resetActivitySmoother } from '../features/scanSpace/activityRecognition'
@@ -44,74 +48,95 @@ import { SmartBreakTracker }     from '../features/scanSpace/smartBreak'
 import { recordPostureFrame, recordBreak } from '../features/scanSpace/postureDataStore'
 import { EXERCISE_LIBRARY }      from '../features/exercise/exerciseLibrary'
 import { useSelectedExercise }   from '../hooks/useSelectedExercise'
-import type { GeminiScanResult, PostureIssue } from '../services/geminiVision'
+import type { GeminiScanResult, FlashTip } from '../services/geminiVision'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-/** On-device analysis throttle: run every N rAF frames */
-const ANALYSIS_EVERY_N = 4
+const ANALYSIS_EVERY_N   = 4
+const CAPTURE_QUALITY    = 0.82
+const MAX_CAPTURE_DIM    = 768
 
-/** Frames that must be consecutively "valid" before auto-capture fires */
-const STABLE_FRAMES_NEEDED = 18   // ~0.6 s at 30 fps
+// ── Frame capture helpers ─────────────────────────────────────────────────────
 
-/** JPEG quality for the captured frame sent to Gemini (0–1) */
-const CAPTURE_QUALITY = 0.82
-
-/** Max short-side dimension for the captured frame (keep payload small) */
-const MAX_CAPTURE_DIM = 768
-
-// ── Frame capture ─────────────────────────────────────────────────────────────
-
-/**
- * Grab a single frame from the video element, optionally mirror it,
- * and return a pure base64 JPEG string (no data-URI prefix).
- */
-function captureFrame(
+function captureFrameFromVideo(
   video: HTMLVideoElement,
   mirrored: boolean,
   quality = CAPTURE_QUALITY,
 ): string {
   const vw = video.videoWidth  || 640
   const vh = video.videoHeight || 480
-
-  // Scale down so the longer side ≤ MAX_CAPTURE_DIM
   const scale = Math.min(1, MAX_CAPTURE_DIM / Math.max(vw, vh))
-  const cw    = Math.round(vw * scale)
-  const ch    = Math.round(vh * scale)
+  const cw = Math.round(vw * scale)
+  const ch = Math.round(vh * scale)
 
-  const offscreen = document.createElement('canvas')
-  offscreen.width  = cw
-  offscreen.height = ch
-  const ctx = offscreen.getContext('2d')!
-
+  const canvas = document.createElement('canvas')
+  canvas.width  = cw
+  canvas.height = ch
+  const ctx = canvas.getContext('2d')!
   if (mirrored) {
     ctx.translate(cw, 0)
     ctx.scale(-1, 1)
   }
   ctx.drawImage(video, 0, 0, cw, ch)
-
-  const dataUrl = offscreen.toDataURL('image/jpeg', quality)
-  // Strip "data:image/jpeg;base64," prefix
-  return dataUrl.split(',')[1] ?? ''
+  const dataUrl = canvas.toDataURL('image/jpeg', quality)
+  return dataUrl.replace(/^data:image\/jpeg;base64,/, '')
 }
 
-// ── Scan state machine ────────────────────────────────────────────────────────
+function fileToBase64Jpeg(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      const scale = Math.min(1, MAX_CAPTURE_DIM / Math.max(img.width, img.height))
+      const cw = Math.round(img.width  * scale)
+      const ch = Math.round(img.height * scale)
+      const canvas = document.createElement('canvas')
+      canvas.width  = cw
+      canvas.height = ch
+      canvas.getContext('2d')!.drawImage(img, 0, 0, cw, ch)
+      URL.revokeObjectURL(url)
+      const dataUrl = canvas.toDataURL('image/jpeg', CAPTURE_QUALITY)
+      resolve(dataUrl.replace(/^data:image\/jpeg;base64,/, ''))
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('Could not load selected image.'))
+    }
+    img.src = url
+  })
+}
+
+// ── Phase type ─────────────────────────────────────────────────────────────────
 
 type ScanPhase =
-  | 'idle'           // permission screen
-  | 'starting'       // camera/model initialising
-  | 'waiting'        // live preview, waiting for stable valid frame
-  | 'capturing'      // snapping the frame
-  | 'analysing'      // awaiting Gemini response
-  | 'result'         // result overlays shown
-  | 'error'          // Gemini/network error
+  | 'idle'        // landing screen
+  | 'camera'      // live camera preview (manual shutter)
+  | 'preview'     // uploaded image preview
+  | 'analysing'   // Gemini in-flight
+  | 'result'      // flashcard deck shown
+  | 'error'
+
+// ── Flashcard category meta ───────────────────────────────────────────────────
+
+const CATEGORY_META: Record<FlashTip['category'], { label: string; color: string; bg: string; icon: string }> = {
+  posture:     { label: 'POSTURE',    color: '#38bdf8', bg: 'rgba(56,189,248,0.15)',   icon: '🦴' },
+  space:       { label: 'WORKSPACE',  color: '#a78bfa', bg: 'rgba(167,139,250,0.15)', icon: '📐' },
+  activity:    { label: 'ACTIVITY',   color: '#34d399', bg: 'rgba(52,211,153,0.15)',  icon: '⚡' },
+  'quick-win': { label: 'QUICK WIN',  color: '#fbbf24', bg: 'rgba(251,191,36,0.15)',  icon: '⚡' },
+}
+
+const SEVERITY_META: Record<FlashTip['severity'], { icon: string; accent: string }> = {
+  good:    { icon: '✓', accent: '#34d399' },
+  warning: { icon: '⚠', accent: '#fbbf24' },
+  tip:     { icon: '💡', accent: '#38bdf8' },
+}
 
 // ── Score ring ────────────────────────────────────────────────────────────────
 
 function ScoreRing({ score, size = 64 }: { score: number; size?: number }) {
-  const r     = (size - 8) / 2
-  const circ  = 2 * Math.PI * r
-  const dash  = (score / 100) * circ
+  const r    = (size - 8) / 2
+  const circ = 2 * Math.PI * r
+  const dash = (score / 100) * circ
   const color = score >= 70 ? '#34d399' : score >= 45 ? '#fbbf24' : '#f87171'
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
@@ -125,19 +150,6 @@ function ScoreRing({ score, size = 64 }: { score: number; size?: number }) {
   )
 }
 
-// ── Severity helpers ──────────────────────────────────────────────────────────
-
-function severityColor(s: PostureIssue['severity']) {
-  if (s === 'good')    return 'text-emerald-400'
-  if (s === 'warning') return 'text-amber-400'
-  return 'text-sky-400'
-}
-function severityIcon(s: PostureIssue['severity']) {
-  if (s === 'good')    return '✓'
-  if (s === 'warning') return '⚠'
-  return '💡'
-}
-
 // ── Glass panel ───────────────────────────────────────────────────────────────
 
 function GlassPanel({ children, className = '' }: { children: React.ReactNode; className?: string }) {
@@ -145,7 +157,7 @@ function GlassPanel({ children, className = '' }: { children: React.ReactNode; c
     <div
       className={`rounded-3xl p-4 ${className}`}
       style={{
-        background:           'rgba(8,12,28,0.80)',
+        background:           'rgba(8,12,28,0.82)',
         backdropFilter:       'blur(28px) saturate(1.8)',
         WebkitBackdropFilter: 'blur(28px) saturate(1.8)',
         border:               '1px solid rgba(255,255,255,0.11)',
@@ -157,206 +169,433 @@ function GlassPanel({ children, className = '' }: { children: React.ReactNode; c
   )
 }
 
-// ── Waiting overlay ───────────────────────────────────────────────────────────
+// ── Swipeable flashcard deck ──────────────────────────────────────────────────
 
-function WaitingOverlay({ stableCount, needed, canProceed }: {
-  stableCount: number
-  needed:      number
-  canProceed:  boolean
-}) {
-  const pct = Math.min(100, Math.round((stableCount / needed) * 100))
+function FlashcardDeck({ tips, onDone }: { tips: FlashTip[]; onDone: () => void }) {
+  const [idx, setIdx] = useState(0)
+  const startXRef = useRef<number | null>(null)
+  const isDragging = useRef(false)
+
+  const tip = tips[idx]
+  if (!tip) return null
+
+  const meta     = CATEGORY_META[tip.category]
+  const sevMeta  = SEVERITY_META[tip.severity]
+  const isFirst  = idx === 0
+  const isLast   = idx === tips.length - 1
+
+  const prev = () => setIdx((i) => Math.max(0, i - 1))
+  const next = () => {
+    if (isLast) { onDone(); return }
+    setIdx((i) => Math.min(tips.length - 1, i + 1))
+  }
+
+  // Touch/mouse swipe
+  const onTouchStart = (e: React.TouchEvent) => {
+    startXRef.current = e.touches[0].clientX
+    isDragging.current = true
+  }
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (!isDragging.current || startXRef.current === null) return
+    const dx = e.changedTouches[0].clientX - startXRef.current
+    isDragging.current = false
+    startXRef.current = null
+    if (dx < -40) next()
+    else if (dx > 40) prev()
+  }
+  const onMouseDown = (e: React.MouseEvent) => {
+    startXRef.current = e.clientX
+    isDragging.current = true
+  }
+  const onMouseUp = (e: React.MouseEvent) => {
+    if (!isDragging.current || startXRef.current === null) return
+    const dx = e.clientX - startXRef.current
+    isDragging.current = false
+    startXRef.current = null
+    if (dx < -40) next()
+    else if (dx > 40) prev()
+  }
+
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-end pb-24 px-6 pointer-events-none">
-      {canProceed && (
-        <GlassPanel className="w-full max-w-sm">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
-            <span className="text-[10px] font-black text-sky-400 uppercase tracking-widest">Auto-Scanning</span>
+    <div className="flex flex-col flex-1 min-h-0 select-none">
+
+      {/* ── Card area ─────────────────────────────────────────────────── */}
+      <div
+        className="flex-1 min-h-0 flex flex-col px-4 pt-3 pb-2 cursor-grab active:cursor-grabbing"
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        onMouseDown={onMouseDown}
+        onMouseUp={onMouseUp}
+      >
+        {/* The card itself */}
+        <div
+          className="flex-1 rounded-3xl flex flex-col justify-between overflow-hidden"
+          key={idx}
+          style={{
+            background: meta.bg,
+            border: `1px solid ${meta.color}40`,
+            animation: 'fadeInUp 0.28s cubic-bezier(0.22,1,0.36,1) both',
+          }}
+        >
+          {/* Card top */}
+          <div className="px-5 pt-5">
+            {/* Category badge */}
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-lg leading-none">{meta.icon}</span>
+              <span
+                className="text-[10px] font-black uppercase tracking-[0.2em]"
+                style={{ color: meta.color }}
+              >
+                {meta.label}
+              </span>
+              <span className="ml-auto text-base leading-none">{sevMeta.icon}</span>
+            </div>
+
+            {/* Headline */}
+            <h2
+              className="text-2xl font-black leading-tight mb-3"
+              style={{ color: 'rgba(255,255,255,0.96)' }}
+            >
+              {tip.headline}
+            </h2>
+
+            {/* Detail */}
+            <p className="text-white/70 text-sm leading-relaxed">
+              {tip.detail}
+            </p>
           </div>
-          <p className="text-white font-semibold text-sm mb-2">Hold still…</p>
-          {/* Progress bar */}
-          <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+
+          {/* Card bottom — action pill */}
+          <div className="px-5 pb-5 pt-4">
             <div
-              className="h-full bg-sky-400 rounded-full transition-all duration-200"
-              style={{ width: `${pct}%` }}
-            />
+              className="rounded-2xl px-4 py-3"
+              style={{
+                background: `${meta.color}22`,
+                border: `1px solid ${meta.color}55`,
+              }}
+            >
+              <p
+                className="text-[10px] font-black uppercase tracking-widest mb-1"
+                style={{ color: meta.color }}
+              >
+                Do this now
+              </p>
+              <p className="text-white font-semibold text-sm leading-snug">
+                {tip.action}
+              </p>
+            </div>
           </div>
-          <p className="text-white/40 text-[10px] mt-1.5 text-right">Waiting for stable frame…</p>
-        </GlassPanel>
+        </div>
+      </div>
+
+      {/* ── Navigation row ────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between px-4 pb-2">
+        <button
+          onClick={prev}
+          disabled={isFirst}
+          aria-label="Previous tip"
+          className="w-11 h-11 rounded-full flex items-center justify-center transition-all active:scale-90 disabled:opacity-30"
+          style={{ background: 'rgba(255,255,255,0.10)', border: '1px solid rgba(255,255,255,0.15)' }}
+        >
+          <ChevronLeft size={20} className="text-white" />
+        </button>
+
+        {/* Progress dots */}
+        <div className="flex items-center gap-1.5">
+          {tips.map((_, i) => (
+            <button
+              key={i}
+              onClick={() => setIdx(i)}
+              aria-label={`Tip ${i + 1}`}
+              className="transition-all duration-200 rounded-full"
+              style={{
+                width:   i === idx ? '20px' : '6px',
+                height:  '6px',
+                background: i === idx
+                  ? CATEGORY_META[tips[i].category].color
+                  : 'rgba(255,255,255,0.25)',
+              }}
+            />
+          ))}
+        </div>
+
+        <button
+          onClick={next}
+          aria-label={isLast ? 'Finish' : 'Next tip'}
+          className="w-11 h-11 rounded-full flex items-center justify-center transition-all active:scale-90"
+          style={{ background: 'rgba(255,255,255,0.10)', border: '1px solid rgba(255,255,255,0.15)' }}
+        >
+          {isLast
+            ? <CheckCircle size={20} className="text-emerald-400" />
+            : <ChevronRight size={20} className="text-white" />}
+        </button>
+      </div>
+
+      {/* Swipe hint — only on first card */}
+      {idx === 0 && (
+        <p className="text-center text-white/25 text-[10px] pb-2 font-medium tracking-wide">
+          Swipe or tap arrows to browse tips
+        </p>
       )}
+    </div>
+  )
+}
+
+// ── Landing screen ────────────────────────────────────────────────────────────
+
+function LandingScreen({
+  onCamera,
+  onUpload,
+  fileInputId,
+}: {
+  onCamera: () => void
+  onUpload: (file: File) => void
+  fileInputId: string
+}) {
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) onUpload(file)
+    e.target.value = ''
+  }
+
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center p-6 gap-7 overflow-y-auto">
+      {/* Hero */}
+      <div className="text-center">
+        <div
+          className="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-lg"
+          style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%)' }}
+        >
+          <ScanLine size={36} className="text-white" />
+        </div>
+        <h1 className="text-2xl font-black text-slate-900 mb-1">Scan Your Space</h1>
+        <p className="text-slate-500 text-sm leading-relaxed max-w-xs mx-auto">
+          Take a photo of yourself at your activity — FitCoach AI will give you
+          personalised posture tips as swipeable cards.
+        </p>
+      </div>
+
+      {/* Action buttons */}
+      <div className="w-full max-w-xs space-y-3">
+        <button
+          onClick={onCamera}
+          className="w-full flex items-center justify-center gap-3 bg-primary text-white font-black rounded-2xl px-6 py-4 text-base active:bg-primary-dark transition-all shadow-card"
+        >
+          <Camera size={22} />
+          Take a Photo
+        </button>
+
+        <label
+          htmlFor={fileInputId}
+          className="w-full flex items-center justify-center gap-3 border-2 border-slate-200 text-slate-700 font-bold rounded-2xl px-6 py-4 text-base active:bg-slate-50 transition-all cursor-pointer"
+        >
+          <Upload size={20} className="text-slate-500" />
+          Upload a Photo
+          <input
+            id={fileInputId}
+            type="file"
+            accept="image/*"
+            className="sr-only"
+            onChange={handleFile}
+          />
+        </label>
+      </div>
+
+      {/* How it works */}
+      <div className="w-full max-w-xs space-y-2.5">
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">How it works</p>
+        {[
+          { icon: '📷', text: 'Capture yourself at your desk, gaming setup, or any activity' },
+          { icon: '🤖', text: 'Gemini Vision AI analyses your posture & workspace' },
+          { icon: '🃏', text: 'Get 5–8 personalised coaching cards to swipe through' },
+          { icon: '⚡', text: 'Each card has a specific action to do right now' },
+          { icon: '🔒', text: 'Only one photo is sent — no continuous upload' },
+        ].map((item) => (
+          <div key={item.text} className="flex items-start gap-3 text-sm text-slate-600">
+            <span className="text-base w-6 text-center shrink-0 mt-0.5">{item.icon}</span>
+            <span className="leading-snug">{item.text}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
 
 // ── Analysing overlay ─────────────────────────────────────────────────────────
 
-function AnalysingOverlay() {
+function AnalysingOverlay({ imageSrc }: { imageSrc?: string }) {
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 pointer-events-none">
-      {/* Pulsing scan ring */}
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 z-30"
+      style={{ background: 'rgba(5,8,20,0.88)', backdropFilter: 'blur(8px)' }}>
+      {imageSrc && (
+        <div className="relative w-24 h-24 rounded-2xl overflow-hidden mb-1">
+          <img src={imageSrc} alt="" className="w-full h-full object-cover" />
+          <div className="absolute inset-0 border-2 border-sky-400/60 rounded-2xl animate-ping" />
+        </div>
+      )}
       <div className="relative flex items-center justify-center">
-        <div className="absolute w-24 h-24 rounded-full border-2 border-sky-400/30 animate-ping" />
-        <div className="w-20 h-20 rounded-full flex items-center justify-center"
+        <div className="absolute w-20 h-20 rounded-full border-2 border-sky-400/30 animate-ping" />
+        <div className="w-16 h-16 rounded-full flex items-center justify-center"
           style={{ background: 'rgba(14,165,233,0.15)', border: '2px solid rgba(14,165,233,0.4)' }}>
-          <Sparkles size={28} className="text-sky-300" />
+          <Sparkles size={24} className="text-sky-300" />
         </div>
       </div>
-      <GlassPanel>
-        <div className="flex items-center gap-3">
-          <Loader2 size={18} className="text-sky-400 animate-spin" />
-          <div>
-            <p className="text-white font-bold text-sm">Analysing your workspace…</p>
-            <p className="text-white/50 text-xs mt-0.5">Gemini Vision AI is reviewing the frame</p>
-          </div>
+      <div className="text-center px-8">
+        <div className="flex items-center justify-center gap-2 mb-1">
+          <Loader2 size={16} className="text-sky-400 animate-spin" />
+          <p className="text-white font-bold text-sm">Analysing your photo…</p>
         </div>
-      </GlassPanel>
+        <p className="text-white/40 text-xs">Gemini Vision AI is reviewing the image</p>
+      </div>
     </div>
   )
 }
 
-// ── Result overlay ────────────────────────────────────────────────────────────
+// ── Result screen ─────────────────────────────────────────────────────────────
 
-function ResultOverlay({
+function ResultScreen({
   result,
+  imageSrc,
   onRescan,
   onSelectExercise,
 }: {
-  result:            GeminiScanResult
-  onRescan:          () => void
-  onSelectExercise:  (id: string) => void
+  result:           GeminiScanResult
+  imageSrc:         string
+  onRescan:         () => void
+  onSelectExercise: (id: string) => void
 }) {
-  const [tab, setTab] = useState<'posture' | 'space' | 'workout'>('posture')
-  const exercises = EXERCISE_LIBRARY.filter((ex) =>
-    ['squat', 'pushup', 'curl'].includes(ex.id)
-  )
+  const [showDeck, setShowDeck] = useState(true)
+  const [deckDone, setDeckDone] = useState(false)
+  const exercises = EXERCISE_LIBRARY.filter((ex) => ['squat', 'pushup', 'curl'].includes(ex.id))
 
   return (
-    <div className="absolute inset-0 flex flex-col justify-end pb-4 px-3 gap-2 pointer-events-none">
+    <div className="flex flex-col flex-1 min-h-0 bg-slate-950">
 
-      {/* Top action banner */}
+      {/* ── Score header ────────────────────────────────────────────── */}
+      <div
+        className="flex-shrink-0 px-4 pt-3 pb-3 flex items-center gap-3"
+        style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+      >
+        {/* Thumbnail */}
+        <div className="w-12 h-12 rounded-2xl overflow-hidden shrink-0 border border-white/10">
+          <img src={imageSrc} alt="Scanned photo" className="w-full h-full object-cover" />
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] font-black text-sky-400 uppercase tracking-widest leading-none mb-0.5">
+            AI Coaching
+          </p>
+          <p className="text-white font-bold text-sm leading-snug line-clamp-2">
+            {result.detectedActivity}
+          </p>
+          <p className="text-white/40 text-[10px] mt-0.5">
+            {result.flashTips.length} personalised tips
+          </p>
+        </div>
+
+        <ScoreRing score={result.postureScore} size={54} />
+      </div>
+
+      {/* ── Top action banner ───────────────────────────────────────── */}
       {result.topAction && (
         <div
-          className="mx-1 rounded-2xl px-4 py-3 flex items-start gap-3 pointer-events-auto"
+          className="mx-4 mt-3 rounded-2xl px-4 py-3 flex items-start gap-2.5 flex-shrink-0"
           style={{
-            background:     'rgba(14,165,233,0.18)',
-            border:         '1px solid rgba(14,165,233,0.35)',
-            backdropFilter: 'blur(20px)',
+            background: 'rgba(14,165,233,0.14)',
+            border:     '1px solid rgba(14,165,233,0.30)',
           }}
         >
-          <Sparkles size={16} className="text-sky-300 shrink-0 mt-0.5" />
+          <Zap size={14} className="text-sky-400 shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
-            <p className="text-[9px] font-black text-sky-400 uppercase tracking-widest mb-0.5">Top Action</p>
-            <p className="text-white font-semibold text-sm leading-snug">{result.topAction}</p>
+            <p className="text-[9px] font-black text-sky-400 uppercase tracking-widest mb-0.5">
+              Most Important Right Now
+            </p>
+            <p className="text-white text-xs font-semibold leading-snug">
+              {result.topAction}
+            </p>
           </div>
-          {/* Score ring */}
-          <ScoreRing score={result.postureScore} size={52} />
         </div>
       )}
 
-      {/* Main panel */}
-      <GlassPanel className="pointer-events-auto">
-        {/* Header + tabs */}
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-1.5">
-            <ScanLine size={13} className="text-sky-400" />
-            <span className="text-[10px] font-black text-sky-400 uppercase tracking-widest">Scan Complete</span>
-          </div>
+      {/* ── Toggle: flashcards ↔ exercises ─────────────────────────── */}
+      {deckDone && (
+        <div className="flex gap-1.5 mx-4 mt-3 flex-shrink-0">
           <button
-            onClick={onRescan}
-            className="flex items-center gap-1.5 bg-white/8 rounded-xl px-2.5 py-1 active:bg-white/15"
+            onClick={() => { setShowDeck(true); setDeckDone(false) }}
+            className={[
+              'flex-1 py-2 rounded-xl text-[11px] font-bold transition-colors',
+              showDeck ? 'bg-sky-500/25 text-sky-300' : 'bg-white/5 text-white/40',
+            ].join(' ')}
           >
-            <RotateCcw size={11} className="text-white/60" />
-            <span className="text-[10px] text-white/60 font-semibold">Rescan</span>
+            🃏 Tips
+          </button>
+          <button
+            onClick={() => setShowDeck(false)}
+            className={[
+              'flex-1 py-2 rounded-xl text-[11px] font-bold transition-colors',
+              !showDeck ? 'bg-emerald-500/25 text-emerald-300' : 'bg-white/5 text-white/40',
+            ].join(' ')}
+          >
+            🏋 Exercises
           </button>
         </div>
+      )}
 
-        {/* Summary */}
-        <p className="text-white/75 text-xs leading-relaxed mb-3">{result.summary}</p>
+      {/* ── Flashcard deck ──────────────────────────────────────────── */}
+      {showDeck && result.flashTips.length > 0 && (
+        <FlashcardDeck
+          tips={result.flashTips}
+          onDone={() => setDeckDone(true)}
+        />
+      )}
 
-        {/* Tab strip */}
-        <div className="flex gap-1 mb-3">
-          {(['posture', 'space', 'workout'] as const).map((t) => (
+      {/* ── Empty tip state ─────────────────────────────────────────── */}
+      {showDeck && result.flashTips.length === 0 && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center">
+          <CheckCircle size={36} className="text-emerald-400" />
+          <p className="text-white font-bold">Great posture detected!</p>
+          <p className="text-white/50 text-sm">{result.summary}</p>
+        </div>
+      )}
+
+      {/* ── Exercise list (after swiping all cards) ──────────────────── */}
+      {!showDeck && (
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-3 pb-2">
+          <p className="text-white/40 text-[11px] mb-3 font-semibold uppercase tracking-wide">
+            Micro-workouts to do at your desk
+          </p>
+          {exercises.map((ex) => (
             <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={[
-                'flex-1 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-wide transition-colors',
-                tab === t
-                  ? 'bg-sky-500/25 text-sky-300'
-                  : 'bg-white/5 text-white/40 active:bg-white/10',
-              ].join(' ')}
+              key={ex.id}
+              onClick={() => onSelectExercise(ex.id)}
+              className="w-full flex items-center gap-3 rounded-2xl px-4 py-3 mb-2 text-left active:bg-white/10 transition-colors"
+              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}
             >
-              {t === 'posture' ? '🦴 Posture' : t === 'space' ? '📐 Space' : '🏋 Workout'}
+              <span className="text-emerald-400 text-base">🏋</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-sm font-semibold">{ex.name}</p>
+                <p className="text-white/40 text-[10px]">{ex.muscleGroups[0]}</p>
+              </div>
+              <ChevronRight size={14} className="text-white/30 shrink-0" />
             </button>
           ))}
         </div>
+      )}
 
-        {/* Posture tab */}
-        {tab === 'posture' && (
-          <div className="space-y-2">
-            {result.postureIssues.length === 0 ? (
-              <div className="flex items-center gap-2 py-2">
-                <CheckCircle size={16} className="text-emerald-400" />
-                <p className="text-emerald-400 text-sm font-semibold">Great posture detected!</p>
-              </div>
-            ) : (
-              result.postureIssues.map((issue, i) => (
-                <div key={i} className="flex items-start gap-2.5">
-                  <span className={`text-sm shrink-0 mt-0.5 ${severityColor(issue.severity)}`}>
-                    {severityIcon(issue.severity)}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-[10px] font-bold uppercase tracking-wide ${severityColor(issue.severity)}`}>
-                      {issue.area}
-                    </p>
-                    <p className="text-white/80 text-xs leading-snug">{issue.observation}</p>
-                    <p className="text-white/50 text-[11px] mt-0.5 leading-snug">→ {issue.suggestion}</p>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-
-        {/* Space tab */}
-        {tab === 'space' && (
-          <div className="space-y-2">
-            {result.spaceObservations.length === 0 ? (
-              <p className="text-white/50 text-xs py-2">No workspace observations available.</p>
-            ) : (
-              result.spaceObservations.map((obs, i) => (
-                <div key={i} className="flex items-start gap-2.5">
-                  <span className="text-sky-400 text-sm shrink-0 mt-0.5">📐</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sky-300 text-[10px] font-bold uppercase tracking-wide">{obs.item}</p>
-                    <p className="text-white/80 text-xs leading-snug">{obs.observation}</p>
-                    <p className="text-white/50 text-[11px] mt-0.5 leading-snug">→ {obs.suggestion}</p>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-
-        {/* Workout tab */}
-        {tab === 'workout' && (
-          <div className="space-y-2">
-            <p className="text-white/50 text-[11px] mb-2">Workspace micro-workouts you can do right now:</p>
-            {exercises.map((ex) => (
-              <button
-                key={ex.id}
-                onClick={() => onSelectExercise(ex.id)}
-                className="w-full flex items-center gap-3 bg-white/6 rounded-xl px-3 py-2.5 text-left active:bg-white/12"
-              >
-                <span className="text-emerald-400 text-xs font-bold">✓</span>
-                <span className="text-white text-sm font-medium flex-1">{ex.name}</span>
-                <span className="text-white/30 text-[10px]">{ex.muscleGroups[0]}</span>
-                <ArrowLeft size={11} className="text-white/30 rotate-180 shrink-0" />
-              </button>
-            ))}
-          </div>
-        )}
-      </GlassPanel>
+      {/* ── Bottom actions ───────────────────────────────────────────── */}
+      <div
+        className="flex-shrink-0 flex gap-2 px-4 pt-2 pb-3"
+        style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
+      >
+        <button
+          onClick={onRescan}
+          className="flex-1 flex items-center justify-center gap-2 rounded-2xl py-3 text-sm font-semibold active:bg-white/10 transition-colors"
+          style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.70)' }}
+        >
+          <RotateCcw size={15} />
+          New Scan
+        </button>
+      </div>
     </div>
   )
 }
@@ -365,7 +604,7 @@ function ResultOverlay({
 
 function ErrorOverlay({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-end pb-24 px-6 pointer-events-none">
+    <div className="absolute inset-0 flex flex-col items-center justify-end pb-24 px-6 pointer-events-none z-30">
       <GlassPanel className="w-full max-w-sm pointer-events-auto">
         <div className="flex items-center gap-3 mb-3">
           <AlertTriangle size={18} className="text-amber-400 shrink-0" />
@@ -384,65 +623,12 @@ function ErrorOverlay({ message, onRetry }: { message: string; onRetry: () => vo
   )
 }
 
-// ── Permission / intro screen ─────────────────────────────────────────────────
-
-function PermissionScreen({ onStart }: { onStart: () => void }) {
-  return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8 text-center gap-6">
-      <div
-        className="w-20 h-20 rounded-3xl flex items-center justify-center shadow-lg"
-        style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%)' }}
-      >
-        <ScanLine size={36} className="text-white" />
-      </div>
-
-      <div>
-        <h2 className="text-2xl font-black text-slate-900 mb-2">Scan Your Space</h2>
-        <p className="text-slate-500 text-sm leading-relaxed max-w-xs mx-auto">
-          Let FitCoach understand your workspace and guide your posture — powered by Gemini AI.
-        </p>
-      </div>
-
-      {/* How it works */}
-      <div className="w-full max-w-xs space-y-3 text-left">
-        {[
-          { icon: '📷', text: 'Camera opens automatically' },
-          { icon: '⏳', text: 'App waits for a stable frame' },
-          { icon: '✨', text: 'One photo sent to Gemini Vision AI' },
-          { icon: '🪑', text: 'Posture + workspace coaching appears' },
-          { icon: '🔒', text: 'Only one frame captured — no continuous upload' },
-        ].map((item) => (
-          <div key={item.text} className="flex items-center gap-3 text-sm text-slate-600">
-            <span className="text-lg w-6 text-center">{item.icon}</span>
-            <span>{item.text}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* THE ONLY BUTTON */}
-      <button
-        onClick={onStart}
-        className="w-full max-w-xs flex items-center justify-center gap-2 bg-primary text-white font-black rounded-2xl px-6 py-4 text-base active:bg-primary-dark transition-all shadow-card"
-      >
-        <ScanLine size={20} />
-        Scan Your Space
-      </button>
-    </div>
-  )
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ScanYourSpacePage() {
-  const navigate = useNavigate()
+  const navigate           = useNavigate()
   const { setSelectedExercise } = useSelectedExercise()
-
-  // Debug: log on mount so it's easy to spot in the console
-  useEffect(() => {
-    console.log('[ScanSpace] component mounted')
-    return () => { console.log('[ScanSpace] component unmounted') }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const fileInputId        = useId()
 
   // Camera + pose
   const camera    = useCamera()
@@ -450,54 +636,53 @@ export default function ScanYourSpacePage() {
   const voice     = useVoiceCoach()
   const canvasRef = useRef<HTMLCanvasElement>(null!)
 
-  // Scan state machine
+  // Page state
   const [phase, setPhase]           = useState<ScanPhase>('idle')
-  const [stableCount, setStableCount] = useState(0)
   const [geminiResult, setGeminiResult] = useState<GeminiScanResult | null>(null)
   const [errorMsg, setErrorMsg]     = useState<string | null>(null)
+  // The image sent to Gemini / shown as thumbnail
+  const [previewSrc, setPreviewSrc] = useState<string>('')
 
-  // Human scene validation — shared gate
+  // On-device tracking
   const validationSmoother = useMemo(() => new ValidationSmoother(), [])
-
-  // On-device tracking (runs in background regardless of scan phase)
   const coach        = useMemo(() => new PostureCoach(), [])
   const breakTracker = useMemo(() => new SmartBreakTracker(), [])
   const frameCount   = useRef(0)
   const lastFrameMs  = useRef(Date.now())
-  const capturedRef  = useRef(false)   // prevent double-capture
-
-  // Track whether the pose loop has already been started this session so we
-  // don't call startLoop twice (once for camera-active, once for model-ready).
   const poseLoopStartedRef = useRef(false)
+  const lastSpokenSceneStatus = useRef<string>('')
 
-  // ── Step 1: user taps "Scan Your Space" ──────────────────────────────────
-  const handleStart = useCallback(async () => {
-    setPhase('starting')
-    capturedRef.current = false
+  // ── Step 1: user taps "Take Photo" ─────────────────────────────────────────
+  const handleGoCamera = useCallback(async () => {
+    setPhase('camera')
     poseLoopStartedRef.current = false
-    console.log('[ScanSpace] component starting camera')
     await camera.start('user')
   }, [camera])
 
-  // ── Step 2a: camera becomes active → move to 'waiting' immediately so the
-  //   live preview is visible.  The pose loop will start as soon as the model
-  //   is also ready; until then, stableCount stays 0 and no capture fires.
-  //
-  //   KEY FIX: Do NOT gate the 'waiting' phase on poser.modelStatus === 'ready'.
-  //   Previously both conditions had to be true simultaneously.  On mobile the
-  //   MediaPipe model takes 2–5 s to download, so the camera was already
-  //   streaming but the UI stayed on "Opening camera…" the whole time.
-  // ──────────────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (camera.isActive && phase === 'starting') {
-      console.log('[ScanSpace] camera active — transitioning to waiting phase')
-      setPhase('waiting')
+  // ── Step 2: user taps "Upload Photo" ───────────────────────────────────────
+  const handleUpload = useCallback(async (file: File) => {
+    setPhase('analysing')
+    setPreviewSrc(URL.createObjectURL(file))
+    try {
+      const b64 = await fileToBase64Jpeg(file)
+      const dataUri = `data:image/jpeg;base64,${b64}`
+      setPreviewSrc(dataUri)
+      const result = await analyseWorkspaceFrame(b64)
+      if (result.analysisStatus === 'invalid_human_scene') {
+        setErrorMsg('Could not detect a single person in the photo. Please try a clearer photo.')
+        setPhase('error')
+        return
+      }
+      setGeminiResult(result)
+      setPhase('result')
+      if (voice.enabled && result.topAction) voice.speak(result.topAction, true)
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Unknown error')
+      setPhase('error')
     }
-  }, [camera.isActive, phase])
+  }, [voice])
 
-  // ── Step 2b: start the pose loop once BOTH camera AND model are ready ─────
-  //   This is separate from the phase transition above so we don't need the
-  //   model to be ready before showing the live preview.
+  // ── Camera becomes active in camera mode → start pose loop ─────────────────
   useEffect(() => {
     if (
       camera.isActive &&
@@ -505,19 +690,16 @@ export default function ScanYourSpacePage() {
       canvasRef.current &&
       poser.modelStatus === 'ready' &&
       !poseLoopStartedRef.current &&
-      (phase === 'waiting' || phase === 'result')
+      phase === 'camera'
     ) {
       poseLoopStartedRef.current = true
-      console.log('[ScanSpace] starting human validation (pose model ready)')
       poser.startLoop(camera.videoRef.current, canvasRef.current, camera.facing)
     }
   }, [camera.isActive, camera.facing, poser.modelStatus, poser, camera.videoRef, phase])
 
-  // ── Step 3: every pose frame — quality gate + auto-capture ───────────────
-  const lastSpokenSceneStatus = useRef<string>('')
-
+  // ── On-device analysis loop (camera mode only) ──────────────────────────────
   useEffect(() => {
-    if (phase !== 'waiting' && phase !== 'result') return
+    if (phase !== 'camera') return
 
     frameCount.current++
     if (frameCount.current % ANALYSIS_EVERY_N !== 0) return
@@ -526,11 +708,9 @@ export default function ScanYourSpacePage() {
     const deltaMs = now - lastFrameMs.current
     lastFrameMs.current = now
 
-    // ── Human scene validation ────────────────────────────────────────────
     const rawScene = validateHumanScene(poser.poses)
     const scene    = validationSmoother.update(rawScene)
 
-    // TTS for scene status changes (with cooldown)
     if (voice.enabled) {
       const tts = getValidationTtsMessage(scene.status)
       if (tts && tts !== lastSpokenSceneStatus.current) {
@@ -539,7 +719,6 @@ export default function ScanYourSpacePage() {
       }
     }
 
-    // ── On-device analysis (only when single human) ───────────────────
     if (scene.canProceed) {
       const landmarks = poser.poses[0]?.landmarks ?? []
       const act       = recogniseActivity(landmarks)
@@ -548,86 +727,55 @@ export default function ScanYourSpacePage() {
       breakTracker.update(isSitting, posture?.overallScore ?? 0)
       recordPostureFrame(posture?.overallScore ?? 0, isSitting, deltaMs, null)
     }
-
-    // ── Auto-capture gate (only in 'waiting' phase, only SINGLE_HUMAN) ───
-    if (phase !== 'waiting' || capturedRef.current) return
-
-    if (scene.canProceed) {
-      const newCount = stableCount + 1
-      setStableCount(newCount)
-
-      if (newCount >= STABLE_FRAMES_NEEDED) {
-        // All conditions met — capture the frame
-        capturedRef.current = true
-        setPhase('capturing')
-
-        const video    = camera.videoRef.current
-        const mirrored = camera.facing === 'user'
-
-        if (!video) {
-          setErrorMsg('Camera not ready — please try again.')
-          setPhase('error')
-          return
-        }
-
-        console.log('[ScanSpace] suitable frame found — capturing')
-
-        // Slight delay so the UI can show "capturing" state briefly
-        setTimeout(async () => {
-          try {
-            setPhase('analysing')
-            const b64 = captureFrame(video, mirrored)
-            if (!b64) throw new Error('Frame capture failed.')
-            console.log('[ScanSpace] sending image to backend (b64 length=%d)', b64.length)
-            const result = await analyseWorkspaceFrame(b64)
-
-            // Gemini-level backup validation (requirement #11)
-            if (result.analysisStatus === 'invalid_human_scene') {
-              setErrorMsg('Please scan again with only yourself visible.')
-              setPhase('error')
-              return
-            }
-
-            setGeminiResult(result)
-            setPhase('result')
-            // Speak top action if voice is on
-            if (voice.enabled && result.topAction) {
-              voice.speak(result.topAction, true)
-            }
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : 'Unknown error'
-            setErrorMsg(msg)
-            setPhase('error')
-          }
-        }, 80)
-      }
-    } else {
-      // Reset stable counter on invalid human scene
-      setStableCount(0)
-    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [poser.poses, phase])
 
-  // ── Rescan ────────────────────────────────────────────────────────────────
+  // ── Shutter: user taps the capture button in camera mode ───────────────────
+  const handleShutter = useCallback(async () => {
+    const video = camera.videoRef.current
+    if (!video) return
+
+    // Capture frame
+    const mirrored = camera.facing === 'user'
+    const b64  = captureFrameFromVideo(video, mirrored)
+    const dataUri = `data:image/jpeg;base64,${b64}`
+    setPreviewSrc(dataUri)
+
+    // Stop live camera before analysing
+    camera.stop()
+    poser.stopLoop()
+    setPhase('analysing')
+
+    try {
+      const result = await analyseWorkspaceFrame(b64)
+      if (result.analysisStatus === 'invalid_human_scene') {
+        setErrorMsg('Could not detect a single person. Make sure you are clearly visible.')
+        setPhase('error')
+        return
+      }
+      setGeminiResult(result)
+      setPhase('result')
+      if (voice.enabled && result.topAction) voice.speak(result.topAction, true)
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Unknown error')
+      setPhase('error')
+    }
+  }, [camera, poser, voice])
+
+  // ── Rescan ─────────────────────────────────────────────────────────────────
   const handleRescan = useCallback(() => {
-    capturedRef.current = false
     poseLoopStartedRef.current = false
     validationSmoother.reset()
     lastSpokenSceneStatus.current = ''
-    setStableCount(0)
     setGeminiResult(null)
     setErrorMsg(null)
-    // If the camera is still active just go back to waiting; otherwise
-    // re-start the whole camera lifecycle.
-    if (camera.isActive) {
-      setPhase('waiting')
-    } else {
-      setPhase('starting')
-      camera.start('user')
-    }
-  }, [validationSmoother, camera])
+    setPreviewSrc('')
+    setPhase('idle')
+    camera.stop()
+    poser.stopLoop()
+  }, [validationSmoother, camera, poser])
 
-  // ── Navigate to exercise ──────────────────────────────────────────────────
+  // ── Navigate to exercise ───────────────────────────────────────────────────
   const handleSelectExercise = useCallback((id: string) => {
     const ex = EXERCISE_LIBRARY.find((e) => e.id === id)
     if (!ex) return
@@ -637,14 +785,7 @@ export default function ScanYourSpacePage() {
     navigate(`/exercises/${id}`)
   }, [navigate, camera, poser, setSelectedExercise])
 
-  // ── Break handler ─────────────────────────────────────────────────────────
-  const handleTakeBreak = useCallback(() => {
-    recordBreak()
-    breakTracker.takeBreak()
-  }, [breakTracker])
-  void handleTakeBreak  // may be wired to a smart break modal in future
-
-  // ── Cleanup ───────────────────────────────────────────────────────────────
+  // ── Cleanup on unmount ─────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
       poser.stopLoop()
@@ -656,20 +797,44 @@ export default function ScanYourSpacePage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── Render: idle / permission ─────────────────────────────────────────────
+  // ── Break handler (future use) ─────────────────────────────────────────────
+  const handleTakeBreak = useCallback(() => { recordBreak(); breakTracker.takeBreak() }, [breakTracker])
+  void handleTakeBreak
+
+  // ── RENDER ─────────────────────────────────────────────────────────────────
+
+  // ── IDLE — landing screen ──────────────────────────────────────────────────
   if (phase === 'idle') {
     return (
-      // Permission screen uses camera-page so it also fills the full viewport
-      // and the BottomNav clears it correctly
       <div className="camera-page bg-background overflow-y-auto">
-        <PermissionScreen onStart={handleStart} />
+        <LandingScreen
+          onCamera={handleGoCamera}
+          onUpload={handleUpload}
+          fileInputId={fileInputId}
+        />
       </div>
     )
   }
 
+  // ── RESULT — swipeable flashcard deck ──────────────────────────────────────
+  if (phase === 'result' && geminiResult) {
+    return (
+      <div className="camera-page bg-slate-950">
+        <ResultScreen
+          result={geminiResult}
+          imageSrc={previewSrc}
+          onRescan={handleRescan}
+          onSelectExercise={handleSelectExercise}
+        />
+        {/* Reserve space for BottomNav */}
+        <div className="camera-controls" style={{ paddingTop: 0 }} />
+      </div>
+    )
+  }
+
+  // ── CAMERA mode — live preview with manual shutter ─────────────────────────
   const isMirrored = camera.facing === 'user'
 
-  // Derive a human-readable camera error heading for the specific error type
   const cameraErrorHeading = (() => {
     const name = camera.error?.name ?? ''
     if (name === 'NotAllowedError' || name === 'PermissionDeniedError') return 'Camera Permission Required'
@@ -680,16 +845,14 @@ export default function ScanYourSpacePage() {
     return 'Camera Unavailable'
   })()
 
+  const rawSceneForRender   = validateHumanScene(poser.poses)
+  const humanSceneForRender = validationSmoother.update(rawSceneForRender)
+
   return (
     <div className="camera-page bg-slate-950">
-      {/* camera-section fills all available height between nothing and the status bar */}
       <div className="camera-section">
 
-        {/* ── Live video ────────────────────────────────────────────────── */}
-        {/* IMPORTANT: the video element must always be in the DOM once we leave
-            the 'idle' phase so that camera.videoRef is attached before
-            camera.start() is called.  We control visibility via opacity, not
-            display:none, to avoid the video never becoming visible on mobile. */}
+        {/* ── Live video ──────────────────────────────────────────────── */}
         <video
           ref={camera.videoRef}
           autoPlay playsInline muted
@@ -701,23 +864,18 @@ export default function ScanYourSpacePage() {
           aria-label="Camera preview"
         />
 
-        {/* ── Pose skeleton ─────────────────────────────────────────────── */}
+        {/* ── Pose skeleton canvas ─────────────────────────────────────── */}
         <canvas
           ref={canvasRef}
           className={[
             'absolute inset-0 w-full h-full pointer-events-none',
             isMirrored ? 'scale-x-[-1]' : '',
           ].join(' ')}
-          style={{ opacity: phase === 'result' ? 0.35 : 0.60 }}
+          style={{ opacity: 0.55 }}
         />
 
-        {/* ── Camera / model loading ────────────────────────────────────── */}
-        {/* Show the spinner only while the camera is actually starting up
-            (status === 'requesting') OR while phase is explicitly 'starting'.
-            Once phase becomes 'waiting' (camera active) we stop showing this
-            overlay even if the pose model is still loading — the live preview
-            must be visible. */}
-        {(phase === 'starting' || camera.status === 'requesting') && (
+        {/* ── Loading spinner ──────────────────────────────────────────── */}
+        {(phase === 'camera' && !camera.isActive && camera.status === 'requesting') && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 gap-4 z-10">
             <div className="relative flex items-center justify-center">
               <div className="absolute w-16 h-16 rounded-full border-2 border-sky-400/20 animate-ping" />
@@ -727,7 +885,7 @@ export default function ScanYourSpacePage() {
           </div>
         )}
 
-        {/* ── Camera error ──────────────────────────────────────────────── */}
+        {/* ── Camera error ─────────────────────────────────────────────── */}
         {camera.status === 'error' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 p-8 gap-4 z-10">
             <Camera size={40} className="text-white/25" />
@@ -736,29 +894,26 @@ export default function ScanYourSpacePage() {
               {camera.error?.message ?? 'Unknown camera error.'}
             </p>
             <button
-              onClick={() => { camera.start('user') }}
+              onClick={() => camera.start('user')}
               className="mt-2 flex items-center gap-2 bg-sky-500 text-white font-bold text-sm rounded-2xl px-5 py-3 active:bg-sky-600"
             >
               <RotateCcw size={14} />
               Try Again
             </button>
-            <button
-              onClick={() => navigate(-1)}
-              className="text-white/40 text-xs underline"
-            >
+            <button onClick={() => navigate(-1)} className="text-white/40 text-xs underline">
               Back
             </button>
           </div>
         )}
 
-        {/* ── Top bar ───────────────────────────────────────────────────── */}
+        {/* ── Top bar ──────────────────────────────────────────────────── */}
         {camera.isActive && (
           <div className="absolute top-0 left-0 right-0 px-4 pt-3 pb-2 flex items-center justify-between z-20 pointer-events-none">
             <button
-              onClick={() => navigate(-1)}
+              onClick={handleRescan}
               className="pointer-events-auto w-9 h-9 rounded-2xl flex items-center justify-center"
               style={{ background: 'rgba(0,0,0,0.50)', backdropFilter: 'blur(12px)' }}
-              aria-label="Go back"
+              aria-label="Back"
             >
               <ArrowLeft size={18} className="text-white" />
             </button>
@@ -767,124 +922,138 @@ export default function ScanYourSpacePage() {
               className="text-[11px] font-black text-white/80 uppercase tracking-widest"
               style={{ textShadow: '0 1px 6px rgba(0,0,0,0.6)' }}
             >
-              {phase === 'waiting'   ? 'Finding best frame…'
-               : phase === 'capturing' ? 'Capturing…'
-               : phase === 'analysing' ? 'AI Analysing…'
-               : phase === 'result'    ? 'Scan Complete'
-               : phase === 'error'     ? 'Scan Failed'
-               : 'Scan Your Space'}
+              Position yourself &amp; tap
             </span>
 
-            <div className="flex items-center gap-2 pointer-events-auto">
-              <button
-                onClick={voice.toggle}
-                className="w-9 h-9 rounded-2xl flex items-center justify-center"
-                style={{ background: 'rgba(0,0,0,0.50)', backdropFilter: 'blur(12px)' }}
-                aria-label={voice.enabled ? 'Mute voice coach' : 'Enable voice coach'}
-              >
-                {voice.enabled
-                  ? <Volume2  size={16} className="text-emerald-400" />
-                  : <VolumeX  size={16} className="text-white/40" />}
-              </button>
-              <button
-                onClick={camera.switchCamera}
-                className="w-9 h-9 rounded-2xl flex items-center justify-center"
-                style={{ background: 'rgba(0,0,0,0.50)', backdropFilter: 'blur(12px)' }}
-                aria-label="Switch camera"
-              >
-                <FlipHorizontal size={16} className="text-white/70" />
-              </button>
-            </div>
+            <button
+              onClick={voice.toggle}
+              className="pointer-events-auto w-9 h-9 rounded-2xl flex items-center justify-center"
+              style={{ background: 'rgba(0,0,0,0.50)', backdropFilter: 'blur(12px)' }}
+              aria-label={voice.enabled ? 'Mute' : 'Enable voice'}
+            >
+              {voice.enabled
+                ? <Volume2  size={16} className="text-emerald-400" />
+                : <VolumeX  size={16} className="text-white/40" />}
+            </button>
           </div>
         )}
 
-        {/* ── Corner bracket decorations (waiting / result) ────────────── */}
-        {(phase === 'waiting' || phase === 'result') && camera.isActive && (
+        {/* ── Camera switch button (floating top-right, below top bar) ─── */}
+        {camera.isActive && (
+          <CameraSwitchButton
+            onSwitch={camera.switchCamera}
+            disabled={camera.status === 'requesting'}
+            facing={camera.facing}
+          />
+        )}
+
+        {/* ── Corner brackets ──────────────────────────────────────────── */}
+        {camera.isActive && (
           <>
-            <div className="absolute top-14 left-4 w-6 h-6 border-t-2 border-l-2 border-sky-400/60 rounded-tl pointer-events-none" />
-            <div className="absolute top-14 right-4 w-6 h-6 border-t-2 border-r-2 border-sky-400/60 rounded-tr pointer-events-none" />
+            <div className="absolute top-16 left-4 w-6 h-6 border-t-2 border-l-2 border-sky-400/60 rounded-tl pointer-events-none" />
+            <div className="absolute top-16 right-4 w-6 h-6 border-t-2 border-r-2 border-sky-400/60 rounded-tr pointer-events-none" />
             <div className="absolute bottom-28 left-4 w-6 h-6 border-b-2 border-l-2 border-sky-400/60 rounded-bl pointer-events-none" />
             <div className="absolute bottom-28 right-4 w-6 h-6 border-b-2 border-r-2 border-sky-400/60 rounded-br pointer-events-none" />
           </>
         )}
 
-        {/* ── Flash overlay on capture ──────────────────────────────────── */}
-        {phase === 'capturing' && (
-          <div className="absolute inset-0 bg-white/20 animate-[fadeIn_0.15s_ease-out] pointer-events-none" />
-        )}
-
-        {/* ── Human validation overlay (waiting phase) ─────────────────── */}
-        {camera.isActive && phase === 'waiting' && (() => {
-          const rawScene = validateHumanScene(poser.poses)
-          const scene    = validationSmoother.update(rawScene)
-          return (
-            <>
-              <HumanValidationOverlay
-                status={scene.status}
-                message={scene.message}
-                contextHint={
-                  scene.status === 'NO_HUMAN'
-                    ? 'Make sure you are visible in the camera.'
-                    : scene.status === 'MULTIPLE_HUMANS'
-                    ? 'Only one person should be visible.'
-                    : undefined
-                }
-                personCount={scene.personCount}
-                position="top"
-                showReady={true}
-              />
-              <WaitingOverlay
-                stableCount={stableCount}
-                needed={STABLE_FRAMES_NEEDED}
-                canProceed={scene.canProceed}
-              />
-            </>
-          )
-        })()}
-
-        {/* ── Phase-specific overlays ───────────────────────────────────── */}
-
-        {(phase === 'capturing' || phase === 'analysing') && (
-          <AnalysingOverlay />
-        )}
-
-        {phase === 'result' && geminiResult && (
-          <ResultOverlay
-            result={geminiResult}
-            onRescan={handleRescan}
-            onSelectExercise={handleSelectExercise}
+        {/* ── Human validation overlay ──────────────────────────────────── */}
+        {camera.isActive && (
+          <HumanValidationOverlay
+            status={humanSceneForRender.status}
+            message={humanSceneForRender.message}
+            contextHint={
+              humanSceneForRender.status === 'NO_HUMAN'
+                ? 'Make sure your full body is visible.'
+                : humanSceneForRender.status === 'MULTIPLE_HUMANS'
+                ? 'Only one person should be in frame.'
+                : undefined
+            }
+            personCount={humanSceneForRender.personCount}
+            position="top"
+            showReady={true}
           />
         )}
 
+        {/* ── Analysing overlay ─────────────────────────────────────────── */}
+        {phase === 'analysing' && (
+          <AnalysingOverlay imageSrc={previewSrc || undefined} />
+        )}
+
+        {/* ── Error overlay ─────────────────────────────────────────────── */}
         {phase === 'error' && (
           <ErrorOverlay
-            message={errorMsg ?? 'Something went wrong. Please try again.'}
+            message={errorMsg ?? 'Something went wrong.'}
             onRetry={handleRescan}
           />
         )}
       </div>
 
-      {/* ── Status strip — uses camera-controls for safe-area clearance ─── */}
+      {/* ── Camera controls bar — shutter button ──────────────────────── */}
       <div
-        className="camera-controls flex items-center justify-center gap-2 px-4 pt-2"
-        style={{ background: 'rgba(5,8,20,0.90)', borderTop: '1px solid rgba(255,255,255,0.05)' }}
+        className="camera-controls flex flex-col items-center gap-3 pt-3 px-4"
+        style={{ background: 'rgba(5,8,20,0.92)', borderTop: '1px solid rgba(255,255,255,0.05)' }}
       >
         {camera.isActive && (
           <>
-            <div className={[
-              'w-1.5 h-1.5 rounded-full',
-              phase === 'analysing' ? 'bg-amber-400 animate-pulse' :
-              phase === 'result'    ? 'bg-emerald-400' :
-              phase === 'error'     ? 'bg-rose-400' :
-              'bg-sky-400 animate-pulse',
-            ].join(' ')} />
-            <span className="text-[10px] text-white/35 font-semibold uppercase tracking-widest">
-              {phase === 'waiting'   ? 'Live · Waiting for stable frame'
-               : phase === 'analysing' ? 'Gemini Vision · Analysing'
-               : phase === 'result'    ? 'Scan complete · On-device monitoring active'
-               : phase === 'error'     ? 'Scan failed'
-               : 'On-Device · Live'}
-            </span>
+            {/* Shutter button */}
+            <button
+              onClick={handleShutter}
+              disabled={!humanSceneForRender.canProceed}
+              aria-label="Take photo"
+              className="relative transition-all active:scale-95 disabled:opacity-50"
+              style={{ touchAction: 'manipulation' }}
+            >
+              {/* Outer ring */}
+              <div
+                className="w-18 h-18 rounded-full flex items-center justify-center"
+                style={{
+                  width: '72px',
+                  height: '72px',
+                  background: humanSceneForRender.canProceed
+                    ? 'rgba(255,255,255,0.15)'
+                    : 'rgba(255,255,255,0.06)',
+                  border: `3px solid ${humanSceneForRender.canProceed ? 'rgba(255,255,255,0.80)' : 'rgba(255,255,255,0.20)'}`,
+                }}
+              >
+                {/* Inner disc */}
+                <div
+                  className="rounded-full"
+                  style={{
+                    width: '52px',
+                    height: '52px',
+                    background: humanSceneForRender.canProceed ? 'white' : 'rgba(255,255,255,0.25)',
+                  }}
+                />
+              </div>
+            </button>
+
+            {/* Hint text under shutter */}
+            <p className="text-white/30 text-[10px] font-semibold tracking-wide -mt-1">
+              {humanSceneForRender.canProceed
+                ? 'Tap to capture'
+                : 'Step into frame first'}
+            </p>
+
+            {/* Upload shortcut */}
+            <label
+              htmlFor={`${fileInputId}-camera`}
+              className="flex items-center gap-1.5 text-white/35 text-[11px] font-semibold cursor-pointer active:text-white/60 transition-colors"
+            >
+              <Image size={13} />
+              Upload instead
+              <input
+                id={`${fileInputId}-camera`}
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) handleUpload(file)
+                  e.target.value = ''
+                }}
+              />
+            </label>
           </>
         )}
       </div>

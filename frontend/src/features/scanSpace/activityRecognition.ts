@@ -93,11 +93,22 @@ function classifyRaw(landmarks: NormalizedLandmark[]): { activity: ActivityType;
   if (!vis(nose) && !hasUpperBody) return { activity: 'UNKNOWN', confidence: 0 }
 
   // ── PHONE_USE: wrist near face level ─────────────────────────────────────
+  // Tightened to prevent false triggers during bicep curls:
+  //   - require BOTH wrists to be visible (phone held with both hands or at least
+  //     wrist tracking is stable), OR require the wrist to be very close to the face
+  //   - use a tighter vertical window: wrist must be within 0.05 above to 0.08 below ear
+  //   - additionally require that the wrist is near the horizontal centre of the face
+  //     (not off to the side like during a curl)
   if (vis(lWrist) || vis(rWrist)) {
     const wristY = vis(lWrist) ? (lWrist?.y ?? 1) : (rWrist?.y ?? 1)
+    const wristX = vis(lWrist) ? (lWrist?.x ?? 0.5) : (rWrist?.x ?? 0.5)
     const noseY  = nose?.y ?? 0.3
+    const noseX  = nose?.x ?? 0.5
     const earY   = noseY - 0.05
-    if (wristY < earY + 0.08 && wristY > earY - 0.15) {
+    const inVerticalWindow = wristY < earY + 0.05 && wristY > earY - 0.12
+    // Horizontal proximity: wrist must be within ~25% of frame width of the nose
+    const inHorizontalWindow = Math.abs(wristX - noseX) < 0.25
+    if (inVerticalWindow && inHorizontalWindow) {
       return { activity: 'PHONE_USE', confidence: 0.80 }
     }
   }
@@ -127,11 +138,19 @@ function classifyRaw(landmarks: NormalizedLandmark[]): { activity: ActivityType;
 
   // ── DESK_SITTING: upper body dominant, hips present, knees bent or not visible ─
   if (hasUpperBody && (!hasLegs || (vis(lKnee) && (lKnee?.y ?? 0) > hipY))) {
-    // ── READING: head pitched forward/down ──────────────────────────────
+    // ── READING: head pitched significantly forward/down ─────────────────
+    // Tightened thresholds to prevent false positives from normal
+    // seated posture variation:
+    //   - noseBelowShoulders: raised threshold to 0.45 of torso length
+    //     (was 0.30 — too easy to trigger just by leaning slightly)
+    //   - headForward: raised to 0.18 horizontal offset
+    //     (was 0.12 — most seated desk users have ±0.10 of natural sway)
+    //   - Both conditions must be true together for READING (was OR logic)
     if (vis(nose)) {
-      const noseBelowShoulders = (nose?.y ?? 0) > shoulderY + torsoLen * 0.3
-      const headForward = Math.abs((nose?.x ?? 0.5) - ((lShoulder?.x ?? 0) + (rShoulder?.x ?? 0)) / 2) > 0.12
-      if (noseBelowShoulders || (headForward && torsoLen > 0.1)) {
+      const noseBelowShoulders = (nose?.y ?? 0) > shoulderY + torsoLen * 0.45
+      const headForward = Math.abs((nose?.x ?? 0.5) - ((lShoulder?.x ?? 0) + (rShoulder?.x ?? 0)) / 2) > 0.18
+      // Require BOTH cues rather than OR — reduces false positives
+      if (noseBelowShoulders && headForward && torsoLen > 0.1) {
         return { activity: 'READING', confidence: 0.72 }
       }
     }

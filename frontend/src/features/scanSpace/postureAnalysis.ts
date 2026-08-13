@@ -116,13 +116,14 @@ function analyseHeadNeckTilt(lms: NormalizedLandmark[]): PostureCheck {
   let score: number
   let detail: string
 
-  if (tiltAngle <= 8) {
+  // Tightened thresholds (v2): normal seated tilt is ±6°; flag earlier
+  if (tiltAngle <= 6) {
     rating = 'GOOD'; score = 100; detail = 'Neutral'; coaching = null
-  } else if (tiltAngle <= 18) {
+  } else if (tiltAngle <= 15) {
     rating = 'FAIR'; score = 65; detail = 'Slightly tilted'
     coaching = 'Try to keep your head directly above your shoulders.'
   } else {
-    rating = 'POOR'; score = 30; detail = 'Tilted'
+    rating = 'POOR'; score = 25; detail = 'Tilted'
     coaching = 'Gently bring your head back over your shoulders to reduce neck strain.'
   }
 
@@ -172,13 +173,14 @@ function analyseForwardHead(lms: NormalizedLandmark[]): PostureCheck {
 
   let rating: PostureRating; let score: number; let detail: string; let coaching: string | null
 
-  if (forwardRatio < 0.25) {
+  // Tightened: ideal ear-over-shoulder ratio < 0.20 (stricter than 0.25)
+  if (forwardRatio < 0.20) {
     rating = 'GOOD'; score = 100; detail = 'Good'; coaching = null
-  } else if (forwardRatio < 0.55) {
-    rating = 'FAIR'; score = 65; detail = 'Slightly forward'
+  } else if (forwardRatio < 0.45) {
+    rating = 'FAIR'; score = 60; detail = 'Slightly forward'
     coaching = 'Bring your screen closer to eye level to reduce forward head posture.'
   } else {
-    rating = 'POOR'; score = 25; detail = 'Forward'
+    rating = 'POOR'; score = 20; detail = 'Forward'
     coaching = 'Your head appears to be leaning forward. Raise your screen height or move it closer.'
   }
 
@@ -210,13 +212,14 @@ function analyseShoulderAlignment(lms: NormalizedLandmark[]): PostureCheck {
 
   let rating: PostureRating; let score: number; let detail: string; let coaching: string | null
 
-  if (relativeOffset < 0.07) {
+  // Tightened slightly: flag at 0.06 rather than 0.07
+  if (relativeOffset < 0.06) {
     rating = 'GOOD'; score = 100; detail = 'Level'; coaching = null
-  } else if (relativeOffset < 0.16) {
+  } else if (relativeOffset < 0.14) {
     rating = 'FAIR'; score = 65; detail = 'Slight unevenness'
     coaching = 'Try to relax both shoulders evenly — avoid hiking one shoulder up.'
   } else {
-    rating = 'POOR'; score = 30; detail = 'Uneven'
+    rating = 'POOR'; score = 25; detail = 'Uneven'
     coaching = 'Relax your raised shoulder. Both shoulders should rest at the same height.'
   }
 
@@ -252,13 +255,14 @@ function analyseTorsoInclination(lms: NormalizedLandmark[]): PostureCheck {
 
   let rating: PostureRating; let score: number; let detail: string; let coaching: string | null
 
-  if (tiltAngle <= 12) {
+  // Tightened: acceptable desk-sitting lean is ~8°; flag earlier at 10°
+  if (tiltAngle <= 10) {
     rating = 'GOOD'; score = 100; detail = 'Upright'; coaching = null
-  } else if (tiltAngle <= 22) {
-    rating = 'FAIR'; score = 65; detail = 'Slight forward lean'
+  } else if (tiltAngle <= 20) {
+    rating = 'FAIR'; score = 60; detail = 'Slight forward lean'
     coaching = 'Sit back slightly and let your chair support your lower back.'
   } else {
-    rating = 'POOR'; score = 25; detail = 'Leaning forward'
+    rating = 'POOR'; score = 20; detail = 'Leaning forward'
     coaching = 'Sit back in your chair and relax your shoulders. Avoid hunching toward your screen.'
   }
 
@@ -291,12 +295,24 @@ export function analysePosture(landmarks: NormalizedLandmark[]): PostureAnalysis
   const torsoInclination       = analyseTorsoInclination(landmarks)
   const headForwardProtraction = analyseForwardHead(landmarks)
 
-  const allChecks  = [headNeck, shoulderAlignment, torsoInclination, headForwardProtraction]
-  const measured   = allChecks.filter((c) => c.measured)
-  const reliable   = measured.length >= 2
+  const allChecks = [headNeck, shoulderAlignment, torsoInclination, headForwardProtraction]
+  const measured  = allChecks.filter((c) => c.measured)
+  const reliable  = measured.length >= 2
+
+  // Weighted average: torso inclination and forward head carry more weight
+  // because they cause the most ergonomic impact at a desk.
+  const WEIGHTS: Record<string, number> = {
+    'Head Position':      1.0,
+    'Shoulder Alignment': 1.0,
+    'Torso Position':     1.5,
+    'Forward Head':       1.5,
+  }
+
+  const totalWeight = measured.reduce((s, c) => s + (WEIGHTS[c.label] ?? 1.0), 0)
+  const weightedSum  = measured.reduce((s, c) => s + c.score * (WEIGHTS[c.label] ?? 1.0), 0)
 
   const overallScore = reliable
-    ? Math.round(measured.reduce((s, c) => s + c.score, 0) / measured.length)
+    ? Math.round(weightedSum / totalWeight)
     : 0
 
   return { overallScore, reliable, checks: { headNeck, shoulderAlignment, torsoInclination, headForwardProtraction } }

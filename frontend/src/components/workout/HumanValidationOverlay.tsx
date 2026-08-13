@@ -79,10 +79,13 @@ export default function HumanValidationOverlay({
       ? 'absolute top-16 left-3 right-3'
       : position === 'center'
       ? 'absolute top-1/2 -translate-y-1/2 left-3 right-3'
-      : 'absolute bottom-24 left-3 right-3'
+      : 'absolute bottom-20 left-3 right-3'
 
   return (
-    <div className={`${positionClass} flex justify-center pointer-events-none z-30`}>
+    <div
+      className={`${positionClass} flex justify-center pointer-events-none z-30`}
+      style={{ maxWidth: '85%', left: '7.5%', right: '7.5%' }}
+    >
       {status === 'SINGLE_HUMAN' && readyVisible && <ReadyBadge />}
       {status === 'NO_HUMAN' && (
         <NoHumanBadge
@@ -112,7 +115,7 @@ export default function HumanValidationOverlay({
 function ReadyBadge() {
   return (
     <div
-      className="flex items-center gap-2 px-4 py-2.5 rounded-2xl"
+      className="flex items-center gap-2 px-3 py-2 rounded-xl"
       style={{
         background:           'rgba(16, 185, 129, 0.20)',
         border:               '1px solid rgba(16, 185, 129, 0.50)',
@@ -121,15 +124,10 @@ function ReadyBadge() {
         boxShadow:            '0 4px 20px rgba(0,0,0,0.30)',
       }}
     >
-      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-      <div>
-        <p className="text-[11px] font-black text-emerald-300 uppercase tracking-widest leading-none">
-          ONE PERSON DETECTED
-        </p>
-        <p className="text-white/70 text-[11px] font-medium mt-0.5 leading-snug">
-          You&rsquo;re ready to continue.
-        </p>
-      </div>
+      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+      <p className="text-[11px] font-black text-emerald-300 uppercase tracking-widest leading-none">
+        ● Ready
+      </p>
     </div>
   )
 }
@@ -145,7 +143,7 @@ function NoHumanBadge({
 }) {
   return (
     <div
-      className="w-full max-w-xs rounded-2xl px-4 py-3"
+      className="w-full rounded-xl px-3 py-2.5"
       style={{
         background:           lowConfidence
           ? 'rgba(245, 158, 11, 0.18)'
@@ -155,21 +153,21 @@ function NoHumanBadge({
           : '1px solid rgba(255, 255, 255, 0.12)',
         backdropFilter:       'blur(20px) saturate(1.6)',
         WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-        boxShadow:            '0 6px 28px rgba(0,0,0,0.40)',
+        boxShadow:            '0 4px 16px rgba(0,0,0,0.35)',
       }}
     >
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-amber-400 text-sm font-black shrink-0">⚠</span>
+      <div className="flex items-center gap-1.5">
+        <span className="text-amber-400 text-xs font-black shrink-0">⚠</span>
         <p
-          className="text-[11px] font-black uppercase tracking-widest"
+          className="text-[11px] font-black uppercase tracking-widest leading-none"
           style={{ color: lowConfidence ? '#fbbf24' : 'rgba(255,255,255,0.55)' }}
         >
           {lowConfidence ? 'LOW CONFIDENCE' : 'NO PERSON DETECTED'}
         </p>
       </div>
-      <p className="text-white/80 text-sm font-semibold leading-snug">{message}</p>
+      <p className="text-white/75 text-xs font-medium leading-snug mt-1">{message}</p>
       {contextHint && (
-        <p className="text-white/50 text-[11px] mt-1 leading-snug">{contextHint}</p>
+        <p className="text-white/45 text-[10px] mt-0.5 leading-snug">{contextHint}</p>
       )}
     </div>
   )
@@ -179,26 +177,23 @@ function MultipleHumansBadge({ count, message }: { count?: number; message?: str
   const countLabel = count != null && count >= 2 ? `${count} PEOPLE DETECTED` : 'MULTIPLE PEOPLE'
   return (
     <div
-      className="w-full max-w-xs rounded-2xl px-4 py-3"
+      className="w-full rounded-xl px-3 py-2.5"
       style={{
         background:           'rgba(239, 68, 68, 0.18)',
         border:               '1px solid rgba(239, 68, 68, 0.50)',
         backdropFilter:       'blur(20px) saturate(1.6)',
         WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-        boxShadow:            '0 6px 28px rgba(0,0,0,0.40)',
+        boxShadow:            '0 4px 16px rgba(0,0,0,0.35)',
       }}
     >
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-red-400 text-sm font-black shrink-0">⚠</span>
-        <p className="text-[11px] font-black text-red-300 uppercase tracking-widest">
+      <div className="flex items-center gap-1.5">
+        <span className="text-red-400 text-xs font-black shrink-0">⚠</span>
+        <p className="text-[11px] font-black text-red-300 uppercase tracking-widest leading-none">
           {countLabel}
         </p>
       </div>
-      <p className="text-white/85 text-sm font-semibold leading-snug">
-        {message ?? 'FitCoach works with one person at a time.'}
-      </p>
-      <p className="text-white/50 text-[11px] mt-1 leading-snug">
-        Please make sure only one person is visible.
+      <p className="text-white/80 text-xs font-medium leading-snug mt-1">
+        {message ?? 'Only one person should be visible.'}
       </p>
     </div>
   )

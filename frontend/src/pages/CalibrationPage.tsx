@@ -20,6 +20,7 @@ import CameraView from '../components/workout/CameraView'
 import PoseOverlay from '../components/workout/PoseOverlay'
 import ReferenceGhostCanvas from '../components/workout/ReferenceGhostCanvas'
 import HumanValidationOverlay from '../components/workout/HumanValidationOverlay'
+import CameraSwitchButton from '../components/workout/CameraSwitchButton'
 import { useCamera } from '../hooks/useCamera'
 import { usePoseLandmarker } from '../hooks/usePoseLandmarker'
 import { useCalibration } from '../hooks/useCalibration'
@@ -438,7 +439,7 @@ function StepView({
 
         {/* ── TRUE REFERENCE label (top-left) ────────────────────────── */}
         {isActive && referencePhase && !isFailed && (
-          <div className="absolute top-3 left-3 pointer-events-none">
+          <div className="absolute top-3 left-3 pointer-events-none z-10">
             <div
               className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold"
               style={{ background: 'rgba(34,197,94,0.85)', color: 'white', backdropFilter: 'blur(8px)' }}
@@ -449,9 +450,18 @@ function StepView({
           </div>
         )}
 
-        {/* ── AI COACH match score (top-right) ───────────────────────── */}
+        {/* ── Camera switch button — top-right floating ────────────────── */}
+        {(isActive || status === 'requesting') && (
+          <CameraSwitchButton
+            onSwitch={onSwitchCamera}
+            disabled={status === 'requesting'}
+            facing={facing}
+          />
+        )}
+
+        {/* ── AI COACH match score — below switch button ──────────────── */}
         {isActive && landmarksOk && !isFailed && (
-          <div className="absolute top-3 right-3 pointer-events-none">
+          <div className="absolute top-14 right-3 pointer-events-none z-10">
             <div
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold"
               style={{
@@ -607,11 +617,6 @@ function StepView({
           </>
         )}
 
-        {isActive && (
-          <button onClick={onSwitchCamera} className="w-full text-xs text-slate-400 py-1.5 active:opacity-70">
-            Switch Camera
-          </button>
-        )}
       </div>
     </div>
   )

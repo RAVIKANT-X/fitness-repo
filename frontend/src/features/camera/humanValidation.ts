@@ -62,13 +62,13 @@ export interface HumanSceneValidation {
 // ── Thresholds ────────────────────────────────────────────────────────────────
 
 /** Minimum landmark visibility to consider it "present" */
-const VIS_MIN = 0.45
+const VIS_MIN = 0.50
 
 /** Minimum average visibility across key landmarks for LOW_CONFIDENCE threshold */
-const VIS_LOW = 0.25
+const VIS_LOW = 0.28
 
 /** Minimum average visibility to accept as SINGLE_HUMAN */
-const VIS_ACCEPT = 0.50
+const VIS_ACCEPT = 0.52
 
 /** How many torso landmarks (out of 4) must be visible for a valid human */
 const TORSO_REQUIRED = 3
@@ -77,12 +77,17 @@ const TORSO_REQUIRED = 3
  * Horizontal distance threshold: if the left-cluster and right-cluster of
  * the primary pose are this far apart (in normalised 0–1 coordinates),
  * we flag a potential second person.
- * A normal standing human spans ~0.25–0.40 of frame width at typical distances.
+ * A normal standing human spans ~0.20–0.38 of frame width at typical distances.
+ * Tightened from 0.55 → 0.50 to catch two people standing close together.
  */
-const BODY_WIDTH_MAX = 0.55
+const BODY_WIDTH_MAX = 0.50
 
-/** Minimum frames a state must persist before the UI is updated */
-export const STABLE_FRAMES = 6
+/**
+ * Minimum frames a state must persist before the UI is updated.
+ * Increased from 6 → 8 frames to reduce flicker from single-frame
+ * visibility glitches (especially on back-lit mobile environments).
+ */
+export const STABLE_FRAMES = 8
 
 // ── Landmark index groups ─────────────────────────────────────────────────────
 

@@ -23,13 +23,14 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  ArrowLeft, FlipHorizontal, CameraOff, Camera,
+  ArrowLeft, CameraOff, Camera,
   RotateCcw, Volume2, VolumeX,
 } from 'lucide-react'
 import CameraView from '../components/workout/CameraView'
 import PoseOverlay from '../components/workout/PoseOverlay'
 import ReferenceGhostCanvas from '../components/workout/ReferenceGhostCanvas'
 import HumanValidationOverlay from '../components/workout/HumanValidationOverlay'
+import CameraSwitchButton from '../components/workout/CameraSwitchButton'
 import { useCamera } from '../hooks/useCamera'
 import { usePoseLandmarker } from '../hooks/usePoseLandmarker'
 import { useSelectedExercise } from '../hooks/useSelectedExercise'
@@ -262,29 +263,38 @@ export default function LiveWorkoutPage() {
           </CameraView>
         </div>
 
-        {/* ── TRUE REFERENCE + AI COACH labels — top-left ──────────────── */}
-        {isActive && (
-          <div className="absolute top-3 left-3 flex flex-col gap-1.5 pointer-events-none">
-            {refPhase && (
-              <div
-                className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold w-fit"
-                style={{ background: 'rgba(34,197,94,0.85)', color: 'white', backdropFilter: 'blur(8px)' }}
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-white shrink-0" />
-                TRUE REFERENCE
-              </div>
-            )}
-            {landmarksOk && selectedExercise && (
-              <div className="flex flex-wrap gap-1.5">
-                <AngleChips angles={angles} exerciseId={selectedExercise.id} />
-              </div>
-            )}
+        {/* ── TRUE REFERENCE label — top-left compact badge ────────────── */}
+        {isActive && refPhase && (
+          <div className="absolute top-3 left-3 pointer-events-none z-10">
+            <div
+              className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold w-fit"
+              style={{ background: 'rgba(34,197,94,0.85)', color: 'white', backdropFilter: 'blur(8px)' }}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-white shrink-0" />
+              TRUE REFERENCE
+            </div>
           </div>
         )}
 
-        {/* ── Phase badge + match score — top-right ────────────────────── */}
+        {/* ── Camera switch button — top-right floating ────────────────── */}
+        {(isActive || status === 'requesting') && (
+          <CameraSwitchButton
+            onSwitch={switchCamera}
+            disabled={status === 'requesting'}
+            facing={facing}
+          />
+        )}
+
+        {/* ── Angle chips — below True Reference label ─────────────────── */}
+        {isActive && landmarksOk && selectedExercise && (
+          <div className="absolute top-12 left-3 flex flex-wrap gap-1.5 pointer-events-none z-10">
+            <AngleChips angles={angles} exerciseId={selectedExercise.id} />
+          </div>
+        )}
+
+        {/* ── Phase badge + match score — below switch button ──────────── */}
         {isActive && landmarksOk && (
-          <div className="absolute top-3 right-3 pointer-events-none flex flex-col items-end gap-1.5">
+          <div className="absolute top-14 right-3 pointer-events-none flex flex-col items-end gap-1.5 z-10">
             <PhasePill phase={phase} />
             {refPhase && (
               <div
@@ -303,7 +313,7 @@ export default function LiveWorkoutPage() {
 
         {/* ── Reference deviation banner (True Reference comparison) ───── */}
         {isActive && primaryDeviation && !isMatched && deviations.length === 0 && (
-          <div className="absolute bottom-20 left-3 right-3 pointer-events-none">
+          <div className="absolute bottom-16 left-3 right-3 pointer-events-none z-10">
             <div
               className="rounded-xl px-3 py-2.5"
               style={{
@@ -326,7 +336,7 @@ export default function LiveWorkoutPage() {
 
         {/* ── Analysis deviation banner ─────────────────────────────────── */}
         {isActive && deviations.length > 0 && (
-          <div className="absolute bottom-20 left-3 right-3 pointer-events-none">
+          <div className="absolute bottom-16 left-3 right-3 pointer-events-none z-10">
             {deviations.slice(0, 2).map((d) => (
               <div
                 key={d.id}
@@ -363,7 +373,7 @@ export default function LiveWorkoutPage() {
 
         {/* ── Rep counter + form status strip — bottom of camera ────────── */}
         {isActive && selectedExercise && (
-          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent pt-16 pb-3 px-4 pointer-events-none">
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent pt-16 pb-3 px-4 pointer-events-none z-10">
             <div className="flex items-end justify-between">
               <RepCounter repCount={repCount} phase={phase} />
               <FormPill status={formStatus} />
@@ -395,15 +405,6 @@ export default function LiveWorkoutPage() {
               >
                 <CameraOff size={18} />
                 Stop
-              </button>
-
-              {/* Flip camera */}
-              <button
-                onClick={switchCamera}
-                className="w-14 flex items-center justify-center bg-white/10 text-white rounded-2xl min-h-[52px] active:bg-white/20 transition-colors shrink-0"
-                aria-label="Switch camera"
-              >
-                <FlipHorizontal size={18} />
               </button>
 
               {/* Voice coach toggle */}

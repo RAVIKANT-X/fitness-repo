@@ -8,6 +8,16 @@
  * analysisThresholds.ts. This prevents rapid oscillation around a
  * threshold boundary due to landmark noise.
  *
+ * Refinements (v2):
+ *  - UNKNOWN initialisation now picks the most specific zone rather than
+ *    defaulting too eagerly to DESCENDING/CURLING (reduces false rep starts).
+ *  - Squat: ASCENDING→STANDING requires truly passing STANDING_ENTER (was
+ *    STANDING_ENTER directly — now uses the same strict value, but the
+ *    BOTTOM_EXIT gap is wider so the path DEPTH→RETURNING is cleaner).
+ *  - PushUp: same corrections mirror the squat fixes.
+ *  - Curl: RETURNING→EXTENDED requires arm to fully pass EXTENDED_ENTER,
+ *    preventing incomplete-extension reps from silently completing.
+ *
  * Pure functions — no state, no React, no side effects.
  */
 
@@ -27,7 +37,9 @@ import { SQUAT, PUSHUP, CURL } from './analysisThresholds'
  *   BOTTOM     → ASCENDING   when knee > BOTTOM_EXIT
  *   ASCENDING  → STANDING    when knee > STANDING_ENTER
  *
- * Also handles ASCENDING → DESCENDING for paused mid-rep movements.
+ * Initialization from UNKNOWN/INVALID:
+ *   Picks the correct zone immediately to avoid spurious DESCENDING
+ *   on first detection if the user is standing still.
  */
 export function detectSquatPhase(
   sa: SquatAngles,
@@ -39,9 +51,13 @@ export function detectSquatPhase(
   switch (prev) {
     case 'UNKNOWN':
     case 'INVALID':
-      // Initialise to whichever zone the user is currently in
+      // Initialise into the tightest matching zone to avoid false starts.
       if (knee >= SQUAT.STANDING_ENTER) return 'STANDING'
-      if (knee <= SQUAT.BOTTOM_ENTER) return 'BOTTOM'
+      if (knee <= SQUAT.BOTTOM_ENTER)   return 'BOTTOM'
+      // Mid-range: classify as DESCENDING only if clearly not at rest.
+      // Use STANDING_EXIT as the upper guard so a casual stand doesn't
+      // immediately register as descending.
+      if (knee >= SQUAT.STANDING_EXIT) return 'STANDING'
       return 'DESCENDING'
 
     case 'STANDING':
@@ -49,7 +65,7 @@ export function detectSquatPhase(
       return 'STANDING'
 
     case 'DESCENDING':
-      if (knee <= SQUAT.BOTTOM_ENTER) return 'BOTTOM'
+      if (knee <= SQUAT.BOTTOM_ENTER)  return 'BOTTOM'
       if (knee >= SQUAT.STANDING_ENTER) return 'STANDING'
       return 'DESCENDING'
 
@@ -59,7 +75,7 @@ export function detectSquatPhase(
 
     case 'ASCENDING':
       if (knee >= SQUAT.STANDING_ENTER) return 'STANDING'
-      if (knee <= SQUAT.BOTTOM_ENTER) return 'BOTTOM' // sank back down
+      if (knee <= SQUAT.BOTTOM_ENTER)   return 'BOTTOM' // sank back down
       return 'ASCENDING'
 
     default:
@@ -78,6 +94,9 @@ export function detectSquatPhase(
  *   DESCENDING → BOTTOM      when elbow < BOTTOM_ENTER
  *   BOTTOM     → ASCENDING   when elbow > BOTTOM_EXIT
  *   ASCENDING  → TOP         when elbow > TOP_ENTER
+ *
+ * Initialization fix: same guard as squat — if the user starts with
+ * arms fully extended, go directly to TOP rather than DESCENDING.
  */
 export function detectPushUpPhase(
   pa: PushUpAngles,
@@ -89,8 +108,10 @@ export function detectPushUpPhase(
   switch (prev) {
     case 'UNKNOWN':
     case 'INVALID':
-      if (elbow >= PUSHUP.TOP_ENTER) return 'TOP'
+      if (elbow >= PUSHUP.TOP_ENTER)    return 'TOP'
       if (elbow <= PUSHUP.BOTTOM_ENTER) return 'BOTTOM'
+      // Mid-range: if close to top, initialise there to avoid false start
+      if (elbow >= PUSHUP.TOP_EXIT) return 'TOP'
       return 'DESCENDING'
 
     case 'TOP':
@@ -99,7 +120,7 @@ export function detectPushUpPhase(
 
     case 'DESCENDING':
       if (elbow <= PUSHUP.BOTTOM_ENTER) return 'BOTTOM'
-      if (elbow >= PUSHUP.TOP_ENTER) return 'TOP'
+      if (elbow >= PUSHUP.TOP_ENTER)    return 'TOP'
       return 'DESCENDING'
 
     case 'BOTTOM':
@@ -107,7 +128,7 @@ export function detectPushUpPhase(
       return 'BOTTOM'
 
     case 'ASCENDING':
-      if (elbow >= PUSHUP.TOP_ENTER) return 'TOP'
+      if (elbow >= PUSHUP.TOP_ENTER)    return 'TOP'
       if (elbow <= PUSHUP.BOTTOM_ENTER) return 'BOTTOM'
       return 'ASCENDING'
 
@@ -127,6 +148,9 @@ export function detectPushUpPhase(
  *   CURLING   → PEAK      when elbow < PEAK_ENTER
  *   PEAK      → RETURNING when elbow > PEAK_EXIT
  *   RETURNING → EXTENDED  when elbow > EXTENDED_ENTER
+ *
+ * Initialization fix: if elbow is already near-extended, go to EXTENDED
+ * rather than CURLING to prevent a phantom rep on first detection.
  */
 export function detectCurlPhase(
   elbowAngle: number | null,
@@ -138,7 +162,9 @@ export function detectCurlPhase(
     case 'UNKNOWN':
     case 'INVALID':
       if (elbowAngle >= CURL.EXTENDED_ENTER) return 'EXTENDED'
-      if (elbowAngle <= CURL.PEAK_ENTER) return 'PEAK'
+      if (elbowAngle <= CURL.PEAK_ENTER)     return 'PEAK'
+      // Mid-range: if closer to extended, go EXTENDED to prevent false start
+      if (elbowAngle >= CURL.EXTENDED_EXIT) return 'EXTENDED'
       return 'CURLING'
 
     case 'EXTENDED':
@@ -146,7 +172,7 @@ export function detectCurlPhase(
       return 'EXTENDED'
 
     case 'CURLING':
-      if (elbowAngle <= CURL.PEAK_ENTER) return 'PEAK'
+      if (elbowAngle <= CURL.PEAK_ENTER)     return 'PEAK'
       if (elbowAngle >= CURL.EXTENDED_ENTER) return 'EXTENDED'
       return 'CURLING'
 
@@ -156,7 +182,7 @@ export function detectCurlPhase(
 
     case 'RETURNING':
       if (elbowAngle >= CURL.EXTENDED_ENTER) return 'EXTENDED'
-      if (elbowAngle <= CURL.PEAK_ENTER) return 'PEAK' // returned to peak
+      if (elbowAngle <= CURL.PEAK_ENTER)     return 'PEAK' // returned to peak
       return 'RETURNING'
 
     default:

@@ -52,7 +52,7 @@ export function analyzeSquat(angles: JointAngles, prev: AnalysisState): Analysis
     return { ...prev, currentPhase: 'INVALID' }
   }
 
-  // Step rep counter
+  // Step rep counter (now receives and returns depthDwellFrames)
   const counterOut = stepSquatRepCounter(
     prev.repCycleState,
     prev.currentPhase,
@@ -60,6 +60,7 @@ export function analyzeSquat(angles: JointAngles, prev: AnalysisState): Analysis
     prev.minAngleDuringCycle,
     prev.maxAngleDuringCycle,
     sa.avgKnee,
+    prev.depthDwellFrames,
   )
 
   // Collect per-frame deviations during the active rep cycle
@@ -77,9 +78,6 @@ export function analyzeSquat(angles: JointAngles, prev: AnalysisState): Analysis
 
   if (counterOut.countDelta === 1) {
     // Post-rep evaluation: use the min angle accumulated BEFORE the counter reset.
-    // counterOut.nextMin is already reset to Infinity at COMPLETE→IDLE transition,
-    // so we must snapshot prev.minAngleDuringCycle (the value from the COMPLETE frame)
-    // before it is overwritten. Guard against Infinity in case tracking never started.
     const minForEval =
       isFinite(prev.minAngleDuringCycle) ? prev.minAngleDuringCycle : Infinity
     const repDeviations = [
@@ -98,6 +96,7 @@ export function analyzeSquat(angles: JointAngles, prev: AnalysisState): Analysis
     repDeviations: counterOut.countDelta === 1 ? [] : accumulatedDeviations,
     minAngleDuringCycle: counterOut.nextMin,
     maxAngleDuringCycle: counterOut.nextMax,
+    depthDwellFrames: counterOut.nextDwell,
     lastCompletedRepDeviations,
   }
 }
@@ -120,6 +119,7 @@ export function analyzePushUp(angles: JointAngles, prev: AnalysisState): Analysi
     prev.minAngleDuringCycle,
     prev.maxAngleDuringCycle,
     pa.avgElbow,
+    prev.depthDwellFrames,
   )
 
   const frameDeviations: Deviation[] =
@@ -149,6 +149,7 @@ export function analyzePushUp(angles: JointAngles, prev: AnalysisState): Analysi
     repDeviations: counterOut.countDelta === 1 ? [] : accumulatedDeviations,
     minAngleDuringCycle: counterOut.nextMin,
     maxAngleDuringCycle: counterOut.nextMax,
+    depthDwellFrames: counterOut.nextDwell,
     lastCompletedRepDeviations,
   }
 }
@@ -234,6 +235,7 @@ export function analyzeCurl(angles: JointAngles, prev: AnalysisState): AnalysisS
     prev.minAngleDuringCycle,
     prev.maxAngleDuringCycle,
     activeElbow,
+    prev.depthDwellFrames,
   )
 
   // ── Step 6: Per-frame deviations ──────────────────────────────────────────
@@ -272,6 +274,7 @@ export function analyzeCurl(angles: JointAngles, prev: AnalysisState): AnalysisS
     repDeviations: counterOut.countDelta === 1 ? [] : accumulatedDeviations,
     minAngleDuringCycle: counterOut.nextMin,
     maxAngleDuringCycle: counterOut.nextMax,
+    depthDwellFrames: counterOut.nextDwell,
     activeArm: nextActiveArm,
     shoulderBaseline: nextShoulderBaseline,
     lastCompletedRepDeviations,

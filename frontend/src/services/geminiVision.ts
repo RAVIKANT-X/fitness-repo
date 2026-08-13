@@ -2,15 +2,7 @@
  * Gemini Vision Service — calls Google Gemini 1.5 Flash vision API
  * directly from the browser using the existing VITE_GEMINI_KEY.
  *
- * Usage:
- *   const result = await analyseWorkspaceFrame(base64Jpeg)
- *
- * The API key is intentionally client-side here because:
- *   - It is already exposed in the browser bundle via VITE_GEMINI_KEY
- *   - Gemini free-tier quotas are per-user acceptable
- *   - No raw video is transmitted — only a single captured frame
- *
- * Returns a structured GeminiScanResult or throws on network/API failure.
+ * Returns structured coaching tips designed for a swipeable flashcard UI.
  */
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -24,8 +16,25 @@ export interface PostureIssue {
 
 export interface SpaceObservation {
   item: string           // e.g. "Monitor", "Chair", "Lighting"
-  observation: string    // e.g. "Screen appears below eye level"
-  suggestion: string     // e.g. "Raise monitor by ~5 cm"
+  observation: string
+  suggestion: string
+}
+
+/**
+ * A single flashcard tip — shown one card at a time in the swipe deck.
+ * Each card has a category, headline, detail and a concrete action.
+ */
+export interface FlashTip {
+  /** Card category for colour coding */
+  category: 'posture' | 'space' | 'activity' | 'quick-win'
+  /** Short headline shown large on the card (≤ 8 words) */
+  headline: string
+  /** 1–2 sentence explanation */
+  detail: string
+  /** Single concrete action the user should do right now */
+  action: string
+  /** Severity / importance level */
+  severity: 'good' | 'warning' | 'tip'
 }
 
 export interface GeminiScanResult {
@@ -33,14 +42,19 @@ export interface GeminiScanResult {
   summary: string
   /** 0–100 overall posture score estimated from image */
   postureScore: number
-  /** Per-area posture checks */
+  /** Per-area posture checks (legacy — kept for compatibility) */
   postureIssues: PostureIssue[]
-  /** Workspace environment observations */
+  /** Workspace environment observations (legacy — kept for compatibility) */
   spaceObservations: SpaceObservation[]
   /** The single most important action to take right now */
   topAction: string
   /** Activity detected in the image */
   detectedActivity: string
+  /**
+   * Flashcard tips — ordered by priority, ready to swipe through.
+   * 5–8 cards covering posture, workspace, activity-specific advice and quick wins.
+   */
+  flashTips: FlashTip[]
   /**
    * Gemini-level scene validation status.
    *  "valid"               — single person clearly detected, analysis is valid
@@ -53,7 +67,7 @@ export interface GeminiScanResult {
 
 const SYSTEM_PROMPT = `You are FitCoach AI, an expert posture and workspace wellness coach.
 
-Analyse the provided image of a person at their workspace.
+Analyse the provided image of a person at their workspace or during an activity.
 
 You MUST respond with ONLY valid JSON — no markdown, no code fences, no explanations.
 Do NOT include \`\`\`json or any other wrapping.
@@ -61,8 +75,10 @@ Do NOT include \`\`\`json or any other wrapping.
 Respond with this exact JSON structure:
 {
   "analysisStatus": "valid",
-  "summary": "One or two sentence overall assessment of posture and workspace.",
+  "summary": "One or two sentence overall assessment.",
   "postureScore": 75,
+  "detectedActivity": "Sitting at desk",
+  "topAction": "The single most important thing to do right now.",
   "postureIssues": [
     {
       "area": "Head / Neck",
@@ -78,21 +94,36 @@ Respond with this exact JSON structure:
       "suggestion": "Specific suggestion"
     }
   ],
-  "topAction": "The single most important thing the person should do right now.",
-  "detectedActivity": "Sitting at desk"
+  "flashTips": [
+    {
+      "category": "posture",
+      "headline": "Chin tuck now",
+      "detail": "Your head is protruding forward by about 5 cm. This strains the neck extensors and compresses cervical discs.",
+      "action": "Pull your chin straight back so your ears align over your shoulders. Hold 5 seconds.",
+      "severity": "warning"
+    }
+  ]
 }
 
-Rules:
-- analysisStatus: "valid" if exactly one person is clearly visible; "invalid_human_scene" if no person, multiple people, or the main subject cannot be identified
-- postureScore: integer 0–100 based on what you observe; set to 0 if analysisStatus is "invalid_human_scene"
+Rules for flashTips (MOST IMPORTANT — read carefully):
+- Generate 5 to 8 flashTips, ordered from most urgent to least urgent
+- category must be one of: "posture" | "space" | "activity" | "quick-win"
+- headline: 3–8 words maximum, imperative or noun phrase, e.g. "Raise your screen", "Shoulders back", "Desk lighting fix"
+- detail: 1–2 sentences explaining WHY this matters and WHAT you observe
+- action: ONE specific concrete action the user can do in 30 seconds
+- severity: "good" (they are already doing this well), "warning" (needs correction), "tip" (optional improvement)
+- For the detected activity include at least 2 activity-specific tips (e.g. for desk work: eye-strain, wrist angle; for gaming: lumbar support, neck position)
+- Always include at least 1 "quick-win" category card (something fixable in under 1 minute)
+- Always include at least 1 "good" severity card to acknowledge what is already correct
+- Keep all text CONCISE — detail ≤ 40 words, action ≤ 20 words
+
+Rules for other fields:
+- analysisStatus: "valid" if exactly one person is clearly visible; "invalid_human_scene" otherwise
+- postureScore: integer 0–100; 0 if invalid_human_scene
 - severity values: "good" | "warning" | "tip"
-- postureIssues: analyse head/neck, shoulders, torso/spine, arms/wrists (only include visible areas)
-- spaceObservations: note monitor height, lighting, chair, keyboard position, clutter (only what's visible)
-- topAction: must be a single, concrete, actionable sentence (not generic)
-- If no person is clearly visible OR multiple people are visible, set analysisStatus to "invalid_human_scene", postureScore to 0, and explain in summary
-- Do NOT diagnose medical conditions — use coaching language only
-- Maximum 4 postureIssues and 4 spaceObservations
-- Keep all text concise`
+- postureIssues: max 4 items
+- spaceObservations: max 4 items
+- Do NOT diagnose medical conditions — coaching language only`
 
 // ── API call ──────────────────────────────────────────────────────────────────
 
@@ -101,9 +132,7 @@ const GEMINI_BASE  = 'https://generativelanguage.googleapis.com/v1beta/models'
 
 /**
  * Send a captured JPEG frame (base64, no data-URI prefix) to Gemini Vision.
- * Returns structured coaching result.
- *
- * @param base64Jpeg  Pure base64 string (strip "data:image/jpeg;base64," prefix before passing)
+ * Returns structured coaching result with flashcard tips.
  */
 export async function analyseWorkspaceFrame(base64Jpeg: string): Promise<GeminiScanResult> {
   const apiKey = import.meta.env.VITE_GEMINI_KEY as string | undefined
@@ -129,7 +158,7 @@ export async function analyseWorkspaceFrame(base64Jpeg: string): Promise<GeminiS
     ],
     generationConfig: {
       temperature: 0.2,
-      maxOutputTokens: 1024,
+      maxOutputTokens: 1500,
     },
   }
 
@@ -172,14 +201,28 @@ export async function analyseWorkspaceFrame(base64Jpeg: string): Promise<GeminiS
     const analysisStatus = parsed.analysisStatus === 'invalid_human_scene'
       ? 'invalid_human_scene'
       : 'valid'
+
+    // Normalise flashTips — ensure valid categories and severities
+    const rawTips: FlashTip[] = Array.isArray(parsed.flashTips) ? parsed.flashTips : []
+    const validCategories = new Set(['posture', 'space', 'activity', 'quick-win'])
+    const validSeverities = new Set(['good', 'warning', 'tip'])
+    const flashTips: FlashTip[] = rawTips.map((t) => ({
+      category: validCategories.has(t.category) ? t.category : 'posture',
+      headline: t.headline ?? 'Posture tip',
+      detail:   t.detail   ?? '',
+      action:   t.action   ?? '',
+      severity: validSeverities.has(t.severity) ? t.severity : 'tip',
+    }))
+
     return {
       analysisStatus,
-      summary:            parsed.summary            ?? 'Analysis complete.',
-      postureScore:       analysisStatus === 'invalid_human_scene' ? 0 : clamp(parsed.postureScore ?? 50, 0, 100),
-      postureIssues:      Array.isArray(parsed.postureIssues)      ? parsed.postureIssues      : [],
-      spaceObservations:  Array.isArray(parsed.spaceObservations)  ? parsed.spaceObservations  : [],
-      topAction:          parsed.topAction          ?? '',
-      detectedActivity:   parsed.detectedActivity   ?? 'Unknown',
+      summary:           parsed.summary            ?? 'Analysis complete.',
+      postureScore:      analysisStatus === 'invalid_human_scene' ? 0 : clamp(parsed.postureScore ?? 50, 0, 100),
+      postureIssues:     Array.isArray(parsed.postureIssues)     ? parsed.postureIssues     : [],
+      spaceObservations: Array.isArray(parsed.spaceObservations) ? parsed.spaceObservations : [],
+      topAction:         parsed.topAction          ?? '',
+      detectedActivity:  parsed.detectedActivity   ?? 'Unknown',
+      flashTips,
     }
   } catch {
     throw new Error(`Gemini returned non-JSON response: ${cleaned.slice(0, 200)}`)
