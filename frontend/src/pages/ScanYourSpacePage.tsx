@@ -1015,24 +1015,23 @@ export default function ScanYourSpacePage() {
       >
         {camera.isActive && (
           <>
-            {/* Shutter button */}
+            {/* Shutter button — always tappable; Gemini validates the photo */}
             <button
               onClick={handleShutter}
-              disabled={!humanSceneForRender.canProceed}
+              disabled={!camera.isActive}
               aria-label="Take photo"
-              className="relative transition-all active:scale-95 disabled:opacity-50"
+              className="relative transition-all active:scale-95"
               style={{ touchAction: 'manipulation' }}
             >
-              {/* Outer ring */}
+              {/* Outer ring — brighter when a person is detected */}
               <div
-                className="w-18 h-18 rounded-full flex items-center justify-center"
+                className="rounded-full flex items-center justify-center"
                 style={{
                   width: '72px',
                   height: '72px',
-                  background: humanSceneForRender.canProceed
-                    ? 'rgba(255,255,255,0.15)'
-                    : 'rgba(255,255,255,0.06)',
-                  border: `3px solid ${humanSceneForRender.canProceed ? 'rgba(255,255,255,0.80)' : 'rgba(255,255,255,0.20)'}`,
+                  background: 'rgba(255,255,255,0.15)',
+                  border: `3px solid ${humanSceneForRender.canProceed ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.40)'}`,
+                  transition: 'border-color 0.3s ease',
                 }}
               >
                 {/* Inner disc */}
@@ -1041,7 +1040,9 @@ export default function ScanYourSpacePage() {
                   style={{
                     width: '52px',
                     height: '52px',
-                    background: humanSceneForRender.canProceed ? 'white' : 'rgba(255,255,255,0.25)',
+                    background: 'white',
+                    opacity: humanSceneForRender.canProceed ? 1 : 0.5,
+                    transition: 'opacity 0.3s ease',
                   }}
                 />
               </div>
@@ -1049,9 +1050,7 @@ export default function ScanYourSpacePage() {
 
             {/* Hint text under shutter */}
             <p className="text-white/30 text-[10px] font-semibold tracking-wide -mt-1">
-              {humanSceneForRender.canProceed
-                ? 'Tap to capture'
-                : 'Step into frame first'}
+              Tap to capture
             </p>
 
             {/* Upload shortcut */}

@@ -74,20 +74,28 @@ const VIS_ACCEPT = 0.52
 const TORSO_REQUIRED = 3
 
 /**
- * Horizontal distance threshold: if the left-cluster and right-cluster of
- * the primary pose are this far apart (in normalised 0–1 coordinates),
- * we flag a potential second person.
- * A normal standing human spans ~0.20–0.38 of frame width at typical distances.
- * Tightened from 0.55 → 0.50 to catch two people standing close together.
+ * Horizontal distance threshold for the multiple-people heuristic.
+ *
+ * A single person sitting close to the camera (arms wide, shoulders towards
+ * the lens) can easily produce normalised shoulder widths of 0.45–0.60.
+ * Raising the threshold to 0.72 means only clearly split-frame double-person
+ * scenes trigger the warning, not a single person sitting up close.
  */
-const BODY_WIDTH_MAX = 0.50
+const BODY_WIDTH_MAX = 0.72
 
 /**
- * Minimum frames a state must persist before the UI is updated.
- * Increased from 6 → 8 frames to reduce flicker from single-frame
- * visibility glitches (especially on back-lit mobile environments).
+ * How many consecutive frames a new status must be seen before it becomes
+ * the committed/displayed state.
+ *
+ * Using a tiered approach:
+ *   SINGLE_HUMAN / NO_HUMAN / LOW_CONFIDENCE  → 6 frames  (fast feedback)
+ *   MULTIPLE_HUMANS                            → 18 frames (very slow to trigger)
+ *
+ * The large value for MULTIPLE_HUMANS means a momentary wide arm stretch or
+ * a camera jitter will never flash the "2 people detected" warning.
  */
-export const STABLE_FRAMES = 8
+export const STABLE_FRAMES           = 6    // default (SINGLE_HUMAN etc.)
+export const STABLE_FRAMES_MULTI     = 18   // extra-slow for MULTIPLE_HUMANS
 
 // ── Landmark index groups ─────────────────────────────────────────────────────
 
@@ -243,7 +251,9 @@ export class ValidationSmoother {
     if (this.pending && raw.status === this.pending.status) {
       this.pendingCount++
       this.pending = raw   // keep latest copy (updated confidence / message)
-      if (this.pendingCount >= STABLE_FRAMES) {
+      // Use the larger threshold for MULTIPLE_HUMANS to avoid false positives
+      const required = raw.status === 'MULTIPLE_HUMANS' ? STABLE_FRAMES_MULTI : STABLE_FRAMES
+      if (this.pendingCount >= required) {
         this.committed    = raw
         this.pending      = null
         this.pendingCount = 0
@@ -321,13 +331,26 @@ function average(values: number[]): number {
  * For a single standing person, shoulder width in normalised coordinates
  * is typically 0.10–0.35. Beyond BODY_WIDTH_MAX we suspect two people.
  */
+/**
+ * Heuristic: detect a second person in the frame.
+ *
+ * Strategy:
+ *   1. Shoulder width must exceed BODY_WIDTH_MAX (raised to 0.72) — this is
+ *      the primary guard. Only a genuine two-person scene where both torsos
+ *      are visible side-by-side will exceed this at a normal camera distance.
+ *   2. Hip width check uses the same threshold.
+ *   3. The nose-outside-shoulder check is REMOVED — it caused false positives
+ *      when the user was leaning sideways or using a wide-angle camera.
+ *
+ * Both shoulder AND hip signals must agree before flagging, reducing false
+ * positives further (one bad landmark won't trigger the warning alone).
+ */
 function detectMultiplePeopleHeuristic(landmarks: NormalizedLandmark[]): boolean {
   const lShoulder = landmarks[11]
   const rShoulder = landmarks[12]
   const lHip      = landmarks[23]
   const rHip      = landmarks[24]
 
-  // Need both shoulders or both hips to be visible
   const shouldersVisible =
     (lShoulder?.visibility ?? 0) >= VIS_MIN &&
     (rShoulder?.visibility ?? 0) >= VIS_MIN
@@ -336,26 +359,14 @@ function detectMultiplePeopleHeuristic(landmarks: NormalizedLandmark[]): boolean
     (lHip?.visibility ?? 0) >= VIS_MIN &&
     (rHip?.visibility ?? 0) >= VIS_MIN
 
-  if (shouldersVisible) {
-    const width = Math.abs(lShoulder.x - rShoulder.x)
-    if (width > BODY_WIDTH_MAX) return true
-  }
+  const shouldersTooWide = shouldersVisible &&
+    Math.abs(lShoulder.x - rShoulder.x) > BODY_WIDTH_MAX
 
-  if (hipsVisible) {
-    const width = Math.abs(lHip.x - rHip.x)
-    if (width > BODY_WIDTH_MAX) return true
-  }
+  const hipsTooWide = hipsVisible &&
+    Math.abs(lHip.x - rHip.x) > BODY_WIDTH_MAX
 
-  // Check if head (nose) is significantly outside the shoulder envelope
-  // This can indicate a second person's head in the frame
-  const nose = landmarks[0]
-  if (nose && (nose.visibility ?? 0) >= VIS_MIN && shouldersVisible) {
-    const minX = Math.min(lShoulder.x, rShoulder.x) - 0.15
-    const maxX = Math.max(lShoulder.x, rShoulder.x) + 0.15
-    if (nose.x < minX || nose.x > maxX) return true
-  }
-
-  return false
+  // Require BOTH signals — shoulder width alone could be a close-up shot
+  return shouldersTooWide && hipsTooWide
 }
 
 function getExerciseMessage(exerciseId: string): string {
