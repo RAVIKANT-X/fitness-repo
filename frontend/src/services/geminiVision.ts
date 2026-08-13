@@ -136,8 +136,12 @@ const GEMINI_BASE  = 'https://generativelanguage.googleapis.com/v1beta/models'
  */
 export async function analyseWorkspaceFrame(base64Jpeg: string): Promise<GeminiScanResult> {
   const apiKey = import.meta.env.VITE_GEMINI_KEY as string | undefined
+
+  // Dev-only diagnostic (never logs the key value)
+  console.log('[ScanSpace] Gemini API key configured:', !!apiKey)
+
   if (!apiKey) {
-    throw new Error('VITE_GEMINI_KEY is not configured. Add it to frontend/.env.local.')
+    throw new Error('AI configuration is missing. Please contact the administrator.')
   }
 
   const url = `${GEMINI_BASE}/${GEMINI_MODEL}:generateContent?key=${apiKey}`
