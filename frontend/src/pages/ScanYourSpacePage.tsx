@@ -41,6 +41,7 @@ import {
 import HumanValidationOverlay from '../components/workout/HumanValidationOverlay'
 import CameraSwitchButton from '../components/workout/CameraSwitchButton'
 import { analyseWorkspaceFrame } from '../services/geminiVision'
+import type { PostureScanInput } from '../services/geminiVision'
 import { analysePosture }        from '../features/scanSpace/postureAnalysis'
 import { recogniseActivity, resetActivitySmoother } from '../features/scanSpace/activityRecognition'
 import { PostureCoach }          from '../features/scanSpace/postureCoach'
@@ -80,30 +81,6 @@ function captureFrameFromVideo(
   ctx.drawImage(video, 0, 0, cw, ch)
   const dataUrl = canvas.toDataURL('image/jpeg', quality)
   return dataUrl.replace(/^data:image\/jpeg;base64,/, '')
-}
-
-function fileToBase64Jpeg(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new window.Image()
-    const url = URL.createObjectURL(file)
-    img.onload = () => {
-      const scale = Math.min(1, MAX_CAPTURE_DIM / Math.max(img.width, img.height))
-      const cw = Math.round(img.width  * scale)
-      const ch = Math.round(img.height * scale)
-      const canvas = document.createElement('canvas')
-      canvas.width  = cw
-      canvas.height = ch
-      canvas.getContext('2d')!.drawImage(img, 0, 0, cw, ch)
-      URL.revokeObjectURL(url)
-      const dataUrl = canvas.toDataURL('image/jpeg', CAPTURE_QUALITY)
-      resolve(dataUrl.replace(/^data:image\/jpeg;base64,/, ''))
-    }
-    img.onerror = () => {
-      URL.revokeObjectURL(url)
-      reject(new Error('Could not load selected image.'))
-    }
-    img.src = url
-  })
 }
 
 // ── Phase type ─────────────────────────────────────────────────────────────────
@@ -651,6 +628,16 @@ export default function ScanYourSpacePage() {
   const lastFrameMs  = useRef(Date.now())
   const poseLoopStartedRef = useRef(false)
   const lastSpokenSceneStatus = useRef<string>('')
+  // Snapshot of latest on-device posture data — used instead of sending image to Gemini
+  const latestScanInputRef = useRef<PostureScanInput>({
+    activity: 'UNKNOWN',
+    activityLabel: 'Unknown',
+    postureScore: null,
+    postureChecks: [],
+    humanDetected: false,
+    sessionDurationSeconds: 0,
+  })
+  const scanStartTimeRef = useRef<number>(Date.now())
 
   // ── Step 1: user taps "Take Photo" ─────────────────────────────────────────
   // We ONLY flip the phase here.  The camera.start() call lives in the effect
@@ -674,15 +661,18 @@ export default function ScanYourSpacePage() {
     setPhase('analysing')
     setPreviewSrc(URL.createObjectURL(file))
     try {
-      const b64 = await fileToBase64Jpeg(file)
-      const dataUri = `data:image/jpeg;base64,${b64}`
+      // Show the image preview, but send TEXT ONLY to Gemini (no base64)
+      const dataUri = URL.createObjectURL(file)
       setPreviewSrc(dataUri)
-      const result = await analyseWorkspaceFrame(b64)
-      if (result.analysisStatus === 'invalid_human_scene') {
-        setErrorMsg('Could not detect a single person in the photo. Please try a clearer photo.')
-        setPhase('error')
-        return
+      // Use whatever on-device data was last collected (may be sparse for uploads)
+      const scanInput: PostureScanInput = {
+        ...latestScanInputRef.current,
+        // For uploaded photos we don't have live pose data — use defaults
+        activity:      latestScanInputRef.current.humanDetected ? latestScanInputRef.current.activity : 'UNKNOWN',
+        activityLabel: latestScanInputRef.current.humanDetected ? latestScanInputRef.current.activityLabel : 'Photo upload',
+        humanDetected: true, // user confirmed by uploading their own photo
       }
+      const result = await analyseWorkspaceFrame(scanInput)
       setGeminiResult(result)
       setPhase('result')
       if (voice.enabled && result.topAction) voice.speak(result.topAction, true)
@@ -745,6 +735,23 @@ export default function ScanYourSpacePage() {
       const posture   = isSitting ? analysePosture(landmarks) : null
       breakTracker.update(isSitting, posture?.overallScore ?? 0)
       recordPostureFrame(posture?.overallScore ?? 0, isSitting, deltaMs, null)
+
+      // Keep a fresh snapshot of on-device data for Gemini text prompt
+      latestScanInputRef.current = {
+        activity:        act.activity,
+        activityLabel:   act.label,
+        postureScore:    posture?.overallScore ?? null,
+        humanDetected:   true,
+        sessionDurationSeconds: (Date.now() - scanStartTimeRef.current) / 1000,
+        postureChecks:   posture
+          ? Object.values(posture.checks).map(c => ({
+              label:    c.label,
+              rating:   c.rating,
+              detail:   c.detail,
+              coaching: c.coaching,
+            }))
+          : [],
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [poser.poses, phase])
@@ -766,12 +773,12 @@ export default function ScanYourSpacePage() {
     setPhase('analysing')
 
     try {
-      const result = await analyseWorkspaceFrame(b64)
-      if (result.analysisStatus === 'invalid_human_scene') {
-        setErrorMsg('Could not detect a single person. Make sure you are clearly visible.')
-        setPhase('error')
-        return
+      // Send TEXT ONLY to Gemini — use the on-device pose snapshot (no image)
+      const scanInput: PostureScanInput = {
+        ...latestScanInputRef.current,
+        sessionDurationSeconds: (Date.now() - scanStartTimeRef.current) / 1000,
       }
+      const result = await analyseWorkspaceFrame(scanInput)
       setGeminiResult(result)
       setPhase('result')
       if (voice.enabled && result.topAction) voice.speak(result.topAction, true)

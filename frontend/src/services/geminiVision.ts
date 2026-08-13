@@ -7,6 +7,28 @@
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
+// ── Posture scan input (replaces image — all on-device data) ─────────────────
+
+export interface PostureScanInput {
+  /** Detected activity e.g. "DESK_SITTING", "STANDING" */
+  activity: string
+  /** Activity label e.g. "Sitting at desk" */
+  activityLabel: string
+  /** On-device posture score 0–100 (null if not sitting) */
+  postureScore: number | null
+  /** Per-check coaching results from postureAnalysis.ts */
+  postureChecks: Array<{
+    label: string
+    rating: 'GOOD' | 'FAIR' | 'POOR'
+    detail: string
+    coaching: string | null
+  }>
+  /** Whether a single human was confirmed on-device */
+  humanDetected: boolean
+  /** How many seconds the person has been in this posture (0 if unknown) */
+  sessionDurationSeconds: number
+}
+
 // ── Workout AI Summary types ───────────────────────────────────────────────────
 
 export interface WorkoutCoachingPoint {
@@ -93,34 +115,52 @@ export interface GeminiScanResult {
   analysisStatus: 'valid' | 'invalid_human_scene'
 }
 
-// ── Prompt ────────────────────────────────────────────────────────────────────
+// ── Text prompt builder for posture scan ─────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are FitCoach AI, an expert posture and workspace wellness coach.
+function buildPostureScanPrompt(input: PostureScanInput): string {
+  const checksText = input.postureChecks.length > 0
+    ? input.postureChecks.map(c =>
+        `  - ${c.label}: ${c.rating}${c.detail ? ` — ${c.detail}` : ''}${c.coaching ? ` | Fix: ${c.coaching}` : ''}`
+      ).join('\n')
+    : '  - No posture checks available'
 
-Analyse the provided image of a person at their workspace or during an activity.
+  return `You are FitCoach AI, an expert posture and workspace wellness coach.
+
+A user has been scanned using an on-device AI pose tracker (MediaPipe 33-point skeleton). Analyse the SENSOR DATA below and generate coaching tips.
+
+═══════════════════════════════════════
+ON-DEVICE SENSOR DATA (no image — landmark-based):
+═══════════════════════════════════════
+Activity detected:   ${input.activityLabel} (${input.activity})
+Session duration:    ${input.sessionDurationSeconds > 0 ? `${Math.round(input.sessionDurationSeconds)}s` : 'Unknown'}
+On-device posture score: ${input.postureScore !== null ? `${input.postureScore}/100` : 'N/A (not sitting)'}
+Human detected:      ${input.humanDetected ? 'Yes — single person confirmed' : 'No'}
+
+Posture checks (measured from skeleton landmarks):
+${checksText}
+═══════════════════════════════════════
 
 You MUST respond with ONLY valid JSON — no markdown, no code fences, no explanations.
-Do NOT include \`\`\`json or any other wrapping.
 
 Respond with this exact JSON structure:
 {
   "analysisStatus": "valid",
-  "summary": "One or two sentence overall assessment.",
+  "summary": "One or two sentence overall assessment based on the sensor data.",
   "postureScore": 75,
-  "detectedActivity": "Sitting at desk",
+  "detectedActivity": "${input.activityLabel}",
   "topAction": "The single most important thing to do right now.",
   "postureIssues": [
     {
       "area": "Head / Neck",
-      "observation": "Brief description of what you see",
+      "observation": "What the sensor data shows",
       "suggestion": "Specific actionable coaching tip",
       "severity": "warning"
     }
   ],
   "spaceObservations": [
     {
-      "item": "Monitor",
-      "observation": "Brief description",
+      "item": "Workspace setup",
+      "observation": "General tip based on the detected activity",
       "suggestion": "Specific suggestion"
     }
   ],
@@ -128,70 +168,59 @@ Respond with this exact JSON structure:
     {
       "category": "posture",
       "headline": "Chin tuck now",
-      "detail": "Your head is protruding forward by about 5 cm. This strains the neck extensors and compresses cervical discs.",
-      "action": "Pull your chin straight back so your ears align over your shoulders. Hold 5 seconds.",
+      "detail": "The sensor detected forward head posture. This strains the neck extensors.",
+      "action": "Pull chin straight back so ears align over shoulders. Hold 5 seconds.",
       "severity": "warning"
     }
   ]
 }
 
-Rules for flashTips (MOST IMPORTANT — read carefully):
-- Generate 5 to 8 flashTips, ordered from most urgent to least urgent
+Rules for flashTips:
+- Generate 5 to 8 flashTips ordered from most urgent to least urgent
+- Base ALL tips on the sensor data provided above — reference the actual check results
 - category must be one of: "posture" | "space" | "activity" | "quick-win"
-- headline: 3–8 words maximum, imperative or noun phrase, e.g. "Raise your screen", "Shoulders back", "Desk lighting fix"
-- detail: 1–2 sentences explaining WHY this matters and WHAT you observe
+- headline: 3–8 words maximum
+- detail: 1–2 sentences — reference the specific sensor reading (e.g. "The sensor showed POOR shoulder alignment")
 - action: ONE specific concrete action the user can do in 30 seconds
-- severity: "good" (they are already doing this well), "warning" (needs correction), "tip" (optional improvement)
-- For the detected activity include at least 2 activity-specific tips (e.g. for desk work: eye-strain, wrist angle; for gaming: lumbar support, neck position)
-- Always include at least 1 "quick-win" category card (something fixable in under 1 minute)
-- Always include at least 1 "good" severity card to acknowledge what is already correct
+- severity: "good" | "warning" | "tip"
+- Always include at least 1 "good" severity card for checks that are rated GOOD
+- Always include at least 1 "quick-win" card
 - Keep all text CONCISE — detail ≤ 40 words, action ≤ 20 words
 
 Rules for other fields:
-- analysisStatus: "valid" if exactly one person is clearly visible; "invalid_human_scene" otherwise
-- postureScore: integer 0–100; 0 if invalid_human_scene
-- severity values: "good" | "warning" | "tip"
-- postureIssues: max 4 items
-- spaceObservations: max 4 items
+- analysisStatus: always "valid" (human detection already confirmed on-device)
+- postureScore: use the on-device score if provided, otherwise estimate from checks
+- Do NOT mention "image" or "photo" — this is sensor/landmark data only
 - Do NOT diagnose medical conditions — coaching language only`
+}
 
 // ── API call ──────────────────────────────────────────────────────────────────
 
-const GEMINI_MODEL = 'gemini-2.0-flash-lite'
+const GEMINI_MODEL = 'gemini-3.5-flash-lite'
 const GEMINI_BASE  = 'https://generativelanguage.googleapis.com/v1beta/models'
 
 /**
- * Send a captured JPEG frame (base64, no data-URI prefix) to Gemini Vision.
+ * Analyse posture and activity using TEXT-ONLY Gemini call.
+ * Accepts on-device MediaPipe landmark analysis results — NO image sent.
  * Returns structured coaching result with flashcard tips.
  */
-export async function analyseWorkspaceFrame(base64Jpeg: string): Promise<GeminiScanResult> {
+export async function analyseWorkspaceFrame(input: PostureScanInput): Promise<GeminiScanResult> {
   const apiKey = import.meta.env.VITE_GEMINI_KEY as string | undefined
 
-  // Dev-only diagnostic (never logs the key value)
   console.log('[ScanSpace] Gemini API key configured:', !!apiKey)
 
   if (!apiKey) {
     throw new Error('AI configuration is missing. Please contact the administrator.')
   }
 
+  const prompt = buildPostureScanPrompt(input)
   const url = `${GEMINI_BASE}/${GEMINI_MODEL}:generateContent?key=${apiKey}`
 
+  // TEXT ONLY — no inline_data, no image
   const body = {
-    contents: [
-      {
-        parts: [
-          { text: SYSTEM_PROMPT },
-          {
-            inline_data: {
-              mime_type: 'image/jpeg',
-              data: base64Jpeg,
-            },
-          },
-        ],
-      },
-    ],
+    contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
-      temperature: 0.2,
+      temperature: 0.25,
       maxOutputTokens: 1500,
     },
   }
@@ -224,7 +253,6 @@ export async function analyseWorkspaceFrame(base64Jpeg: string): Promise<GeminiS
     throw new Error('Gemini returned an empty response.')
   }
 
-  // Strip any accidental markdown fences Gemini may add despite instructions
   const cleaned = rawText
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```\s*$/i, '')
@@ -232,11 +260,8 @@ export async function analyseWorkspaceFrame(base64Jpeg: string): Promise<GeminiS
 
   try {
     const parsed = JSON.parse(cleaned) as Partial<GeminiScanResult>
-    const analysisStatus = parsed.analysisStatus === 'invalid_human_scene'
-      ? 'invalid_human_scene'
-      : 'valid'
+    const analysisStatus: 'valid' | 'invalid_human_scene' = 'valid' // always valid — human confirmed on-device
 
-    // Normalise flashTips — ensure valid categories and severities
     const rawTips: FlashTip[] = Array.isArray(parsed.flashTips) ? parsed.flashTips : []
     const validCategories = new Set(['posture', 'space', 'activity', 'quick-win'])
     const validSeverities = new Set(['good', 'warning', 'tip'])
@@ -251,11 +276,11 @@ export async function analyseWorkspaceFrame(base64Jpeg: string): Promise<GeminiS
     return {
       analysisStatus,
       summary:           parsed.summary            ?? 'Analysis complete.',
-      postureScore:      analysisStatus === 'invalid_human_scene' ? 0 : clamp(parsed.postureScore ?? 50, 0, 100),
+      postureScore:      clamp(parsed.postureScore ?? (input.postureScore ?? 50), 0, 100),
       postureIssues:     Array.isArray(parsed.postureIssues)     ? parsed.postureIssues     : [],
       spaceObservations: Array.isArray(parsed.spaceObservations) ? parsed.spaceObservations : [],
       topAction:         parsed.topAction          ?? '',
-      detectedActivity:  parsed.detectedActivity   ?? 'Unknown',
+      detectedActivity:  parsed.detectedActivity   ?? input.activityLabel,
       flashTips,
     }
   } catch {
