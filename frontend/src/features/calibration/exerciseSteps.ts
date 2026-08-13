@@ -6,10 +6,15 @@
  *
  * These steps are derived from the existing exerciseLibrary angle definitions
  * so they share the same biomechanical landmarks — no duplication.
+ *
+ * For custom / AI-generated exercises (id starts with "custom_"), steps are
+ * generated dynamically via generateExerciseSteps() in genericExerciseBridge.
  */
 
 import type { ExerciseStep } from './calibrationTypes'
 import { PoseLandmark } from '../biomechanics/landmarkMapping'
+import { getExerciseById } from '../exercise/exerciseLibrary'
+import { generateExerciseSteps } from '../exercise/genericExerciseBridge'
 
 // ── Squat steps ───────────────────────────────────────────────────────────────
 
@@ -273,5 +278,16 @@ export const EXERCISE_STEPS: Record<string, ExerciseStep[]> = {
 }
 
 export function getStepsForExercise(exerciseId: string): ExerciseStep[] {
-  return EXERCISE_STEPS[exerciseId] ?? []
+  // Built-in exercises
+  if (EXERCISE_STEPS[exerciseId]) return EXERCISE_STEPS[exerciseId]
+
+  // Custom / AI-generated exercises — generate steps dynamically
+  if (exerciseId.startsWith('custom_')) {
+    const exercise = getExerciseById(exerciseId)
+    if (exercise) {
+      return generateExerciseSteps(exercise)
+    }
+  }
+
+  return []
 }

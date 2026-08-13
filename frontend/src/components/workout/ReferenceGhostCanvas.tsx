@@ -2,26 +2,39 @@
  * ReferenceGhostCanvas — renders the True Reference ghost skeleton over
  * a full-screen camera canvas.
  *
- * Used in:
- *  - CalibrationPage (StepView): ghost over user pose, aligned comparison
- *  - LiveWorkoutPage: ghost overlay with correction arrows
+ * Improvements:
+ *  - Phase-synchronised: ghost follows user's movement phase
+ *  - Body-adapted: reference is scaled to user's position/size in frame
+ *  - Temporally smoothed: no snapping between poses
+ *  - Larger markers visible at ~1 meter
+ *  - Labels: "TRUE REFERENCE" shown near ghost head
  *
- * The ghost is drawn on a SEPARATE canvas layered above the pose canvas.
- * This prevents interference with the pose renderer and allows independent
- * opacity/visibility control.
+ * Used in:
+ *  - CalibrationPage: ghost over user pose, aligned comparison
+ *  - LiveWorkoutPage: ghost overlay with correction arrows
  */
 
 import { useEffect, useRef } from 'react'
 import type { NormalizedLandmark } from '../../features/pose/poseTypes'
-import type { JointDeviation } from '../../features/reference'
+import type { JointDeviation, TrueReference } from '../../features/reference'
+import type { MovementPhase } from '../../features/analysis/analysisTypes'
 import { renderReferencGhost } from '../../features/reference'
+import { resolveGhostPose } from '../../features/reference/ghostSync'
 
 interface ReferenceGhostCanvasProps {
   /** Video element for sizing the canvas correctly */
   videoRef: React.RefObject<HTMLVideoElement>
-  /** Reference pose landmarks (33 points) */
+  /** Reference pose landmarks (33 points) — raw single-phase landmarks */
   referenceLandmarks: NormalizedLandmark[]
-  /** User's live landmarks for correction arrows (optional) */
+  /** Full TrueReference for phase-synchronised ghost (optional) */
+  trueReference?: TrueReference
+  /** User's current movement phase (for synchronisation) */
+  currentPhase?: MovementPhase
+  /** 0–1 progress within current phase (for interpolation) */
+  phaseProgress?: number
+  /** Exercise identifier (for phase ordering) */
+  exerciseId?: string
+  /** User's live landmarks for body-relative adaptation + correction arrows */
   userLandmarks?: NormalizedLandmark[]
   /** Active joint deviations — determines which joints are highlighted red */
   deviations?: JointDeviation[]
@@ -36,6 +49,10 @@ interface ReferenceGhostCanvasProps {
 export default function ReferenceGhostCanvas({
   videoRef,
   referenceLandmarks,
+  trueReference,
+  currentPhase = 'UNKNOWN',
+  phaseProgress = 0.5,
+  exerciseId = '',
   userLandmarks = [],
   deviations = [],
   mirrored = true,
@@ -43,6 +60,7 @@ export default function ReferenceGhostCanvas({
   visible = true,
 }: ReferenceGhostCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const prevGhostRef = useRef<NormalizedLandmark[]>([])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -68,12 +86,45 @@ export default function ReferenceGhostCanvas({
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-    if (referenceLandmarks.length === 0) return
+    // Determine which landmarks to render
+    let ghostLandmarks: NormalizedLandmark[]
+
+    if (
+      trueReference &&
+      exerciseId &&
+      currentPhase !== 'UNKNOWN' &&
+      currentPhase !== 'INVALID' &&
+      userLandmarks.length > 0
+    ) {
+      // Phase-synchronised, body-adapted ghost
+      ghostLandmarks = resolveGhostPose(
+        trueReference,
+        currentPhase,
+        exerciseId,
+        userLandmarks,
+        prevGhostRef.current,
+        phaseProgress,
+      )
+    } else if (referenceLandmarks.length > 0) {
+      // Fallback: use raw reference landmarks
+      ghostLandmarks = referenceLandmarks
+    } else {
+      return
+    }
+
+    prevGhostRef.current = ghostLandmarks
+
+    if (ghostLandmarks.length === 0) return
 
     ctx.globalAlpha = opacity
-    renderReferencGhost(ctx, referenceLandmarks, mirrored, deviations, userLandmarks)
+    renderReferencGhost(ctx, ghostLandmarks, mirrored, deviations, userLandmarks)
     ctx.globalAlpha = 1
-  })  // run every render — same cadence as pose renderer
+  })
+
+  // Reset smoothed ghost when exercise or phase changes
+  useEffect(() => {
+    prevGhostRef.current = []
+  }, [exerciseId, currentPhase])
 
   return (
     <canvas

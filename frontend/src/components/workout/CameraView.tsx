@@ -40,11 +40,14 @@ export default function CameraView({
 
   return (
     /*
-     * Outer container: maintains a 3:4 portrait aspect ratio on mobile
-     * and switches to 16:9 on wider screens. `overflow-hidden` clips the
-     * mirrored video correctly.
+     * Outer container: fills 100% of its parent (which is the .camera-section
+     * flex child).  The aspect-ratio approach only works for scrollable pages;
+     * for camera pages the parent already constrains height via flex layout.
+     *
+     * We keep rounded corners on desktop (md+) where the page is centred and
+     * has extra space, but go edge-to-edge on mobile.
      */
-    <div className="relative w-full aspect-[3/4] sm:aspect-video rounded-card overflow-hidden bg-slate-900">
+    <div className="relative w-full h-full overflow-hidden bg-slate-900 md:rounded-card">
 
       {/* ── Live video element ─────────────────────────────────────────── */}
       <video

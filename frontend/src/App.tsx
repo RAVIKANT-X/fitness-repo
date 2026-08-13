@@ -9,6 +9,8 @@ import SessionSummaryPage from './pages/SessionSummaryPage'
 import ProgressPage from './pages/ProgressPage'
 import ProfilePage from './pages/ProfilePage'
 import ConsultDoctorPage from './pages/ConsultDoctorPage'
+import SpecialistPage from './pages/SpecialistPage'
+import ScanYourSpacePage from './pages/ScanYourSpacePage'
 import { ExerciseProvider } from './hooks/useSelectedExercise'
 
 export default function App() {
@@ -26,6 +28,11 @@ export default function App() {
             <Route path="/session-summary" element={<SessionSummaryPage />} />
             <Route path="/progress" element={<ProgressPage />} />
             <Route path="/profile" element={<ProfilePage />} />
+            {/* Specialist page — primary nav item */}
+            <Route path="/specialist" element={<SpecialistPage />} />
+            {/* Scan Your Space — posture + workspace coaching */}
+            <Route path="/scan-space" element={<ScanYourSpacePage />} />
+            {/* Legacy consult-doctor path — keep for backward compat */}
             <Route path="/consult-doctor" element={<ConsultDoctorPage />} />
             {/* Catch-all: redirect unknown routes to home */}
             <Route path="*" element={<Navigate to="/" replace />} />

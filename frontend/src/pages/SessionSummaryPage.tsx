@@ -18,12 +18,15 @@
  *  - Save error is clearly displayed without hiding the workout result.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { CheckCircle, XCircle, AlertTriangle, Dumbbell } from 'lucide-react'
+import { CheckCircle, XCircle, AlertTriangle, Dumbbell, Eye } from 'lucide-react'
 import { getSession } from '../services/sessionService'
 import type { SessionRecord } from '../services/sessionService'
 import type { Deviation } from '../features/analysis/analysisTypes'
+import { getTrueReference } from '../features/reference'
+import { renderReferenceOnly } from '../features/reference/referenceRenderer'
+import type { NormalizedLandmark } from '../features/pose/poseTypes'
 
 // ── Types (mirror WorkoutResult from LiveWorkoutPage) ────────────────────────
 
@@ -44,6 +47,28 @@ interface SummaryState {
   saveStatus: SaveStatus
   savedRecord: SessionRecord | null
   saveError: string | null
+}
+
+// ── Reference pose mini-canvas ────────────────────────────────────────────────
+
+function ReferencePoseCanvasMini({
+  landmarks, size = 64,
+}: { landmarks: NormalizedLandmark[]; size?: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    canvas.width = size; canvas.height = size
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, size, size)
+    renderReferenceOnly(ctx, landmarks, false, 1.0)
+  }, [landmarks, size])
+  return (
+    <canvas ref={canvasRef} width={size} height={size}
+      className="rounded-xl bg-emerald-50 shrink-0"
+      aria-label="Reference pose" />
+  )
 }
 
 // ── Deviation messages (same map as WorkoutFeedback) ─────────────────────────
@@ -144,6 +169,7 @@ export default function SessionSummaryPage() {
   if (!result) return null
 
   const formGood = result.formStatus === 'GOOD'
+  const trueReference = getTrueReference(result.exerciseId)
 
   return (
     <div className="space-y-5 pt-2">
@@ -235,6 +261,33 @@ export default function SessionSummaryPage() {
                   d.severity === 'WARNING' || d.severity === 'ERROR' ? 'text-warning' : 'text-slate-400',
                 ].join(' ')}>●</span>
                 <p className="text-sm text-slate-700 leading-relaxed">{deviationMessage(d.id)}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── True Reference visual comparison ─────────────────────────── */}
+      {trueReference && trueReference.phases.length > 0 && (
+        <div className="bg-surface rounded-2xl shadow-card p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-6 h-6 rounded-lg bg-emerald-100 flex items-center justify-center">
+              <Eye size={13} className="text-emerald-600" aria-hidden="true" />
+            </div>
+            <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">True Reference Comparison</p>
+          </div>
+          <p className="text-xs text-slate-500 mb-3 leading-relaxed">
+            These are the ideal reference positions for {result.exerciseName}. Compare your movement against each phase.
+          </p>
+          <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1">
+            {trueReference.phases.map((phase) => (
+              <div key={phase.phase} className="flex flex-col items-center gap-1.5 shrink-0">
+                <div className="bg-emerald-50 rounded-xl p-1.5">
+                  <ReferencePoseCanvasMini landmarks={phase.pose} size={72} />
+                </div>
+                <span className="text-[9px] font-bold text-emerald-700 text-center max-w-[72px] leading-tight">
+                  {phase.label}
+                </span>
               </div>
             ))}
           </div>

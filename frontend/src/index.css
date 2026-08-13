@@ -2,18 +2,39 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Safe-area + nav-height custom properties ────────────────── */
+/*
+ * --nav-height : visual height of the bottom navigation pill (px)
+ * --safe-bottom: device safe-area inset at the bottom (env fallback 0px)
+ *
+ * Content that must NOT be hidden behind the navbar should add
+ *   padding-bottom: calc(var(--nav-height) + var(--safe-bottom))
+ * Camera pages (full-screen, no scroll) use a flex column where the
+ * controls bar itself carries this padding.
+ */
+:root {
+  --nav-height:  64px;   /* BottomNav pill height including its own padding */
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* Convenience: total clearance a scrollable page needs at the bottom */
+  --page-bottom-clearance: calc(var(--nav-height) + var(--safe-bottom) + 16px);
+}
+
 /* ── Base styles ────────────────────────────────────────────── */
 @layer base {
   html {
     font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* Use dynamic viewport height so browser chrome doesn't cause overflow */
+    height: 100%;
   }
 
   body {
     @apply bg-background text-slate-900;
     /* Prevent iOS tap highlight */
     -webkit-tap-highlight-color: transparent;
+    min-height: 100%;
+    min-height: 100dvh;
   }
 
   /* Smooth scrolling everywhere */
@@ -34,9 +55,59 @@
     @apply bg-surface rounded-card shadow-card p-5;
   }
 
-  /* Bottom nav safe area clearance on iOS */
+  /* Bottom nav safe area clearance on iOS/Android */
   .nav-safe-bottom {
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: var(--safe-bottom);
+  }
+
+  /*
+   * Camera page root — used by LiveWorkoutPage, CalibrationPage, ScanYourSpacePage.
+   * Takes the full dynamic viewport height and lays out as a flex column so
+   * the camera section fills exactly the available space without overflowing
+   * behind the fixed BottomNav.
+   *
+   * Usage: add class="camera-page" to the outermost div of a camera page.
+   */
+  .camera-page {
+    display: flex;
+    flex-direction: column;
+    /* dvh = dynamic viewport height — shrinks when browser chrome appears */
+    height: 100dvh;
+    height: 100vh; /* fallback for older browsers */
+    /* Escape the Layout <main> padding so we fill edge-to-edge */
+    margin-left:  -1rem;   /* undo px-4 */
+    margin-right: -1rem;   /* undo px-4 */
+    margin-top:   -1.25rem; /* undo py-5 */
+    overflow: hidden;
+    background: black;
+  }
+
+  /* Header bar inside a camera-page */
+  .camera-page-header {
+    flex-shrink: 0;
+    z-index: 10;
+  }
+
+  /* The camera section grows to fill all available space between header and controls */
+  .camera-section {
+    flex: 1 1 0;
+    min-height: 0;       /* allow flex child to shrink below content size */
+    overflow: hidden;
+    position: relative;
+    z-index: 1;
+  }
+
+  /*
+   * Controls bar below the camera.
+   * Adds safe-area padding so content is never hidden under the navbar or
+   * the Android system gesture bar.
+   * z-index 10 keeps it above the camera stacking context.
+   */
+  .camera-controls {
+    flex-shrink: 0;
+    z-index: 10;
+    /* Push content above the fixed BottomNav + Android safe area */
+    padding-bottom: calc(var(--nav-height) + max(var(--safe-bottom), 8px));
   }
 
   /* Hide scrollbar but keep scroll behaviour (for filter pills etc.) */
@@ -54,6 +125,26 @@
     backdrop-filter: blur(24px) saturate(1.8);
     -webkit-backdrop-filter: blur(24px) saturate(1.8);
     border: 1px solid rgba(255,255,255,0.55);
+  }
+
+  /* Deep glassmorphism — nav bar */
+  .glass-deep {
+    background: rgba(255,255,255,0.78);
+    backdrop-filter: blur(32px) saturate(2.0) brightness(1.05);
+    -webkit-backdrop-filter: blur(32px) saturate(2.0) brightness(1.05);
+    border: 1px solid rgba(255,255,255,0.65);
+  }
+
+  /* Card hover lift effect */
+  .card-lift {
+    transition: transform 0.2s cubic-bezier(0.22,1,0.36,1), box-shadow 0.2s cubic-bezier(0.22,1,0.36,1);
+  }
+  .card-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.10), 0 2px 6px rgba(0,0,0,0.06);
+  }
+  .card-lift:active {
+    transform: scale(0.98);
   }
 }
 
@@ -118,18 +209,71 @@
     50%       { transform: translateY(-3px); }
   }
 
-  .animate-fade-in-up     { animation: fadeInUp  0.35s cubic-bezier(0.22,1,0.36,1) both; }
-  .animate-fade-in        { animation: fadeIn    0.25s ease both; }
-  .animate-scale-in       { animation: scaleIn   0.35s cubic-bezier(0.22,1,0.36,1) both; }
-  .animate-pulse-glow     { animation: pulseGlow 1.8s ease-in-out infinite; }
-  .animate-spin-slow      { animation: spin      1.2s linear infinite; }
+  /* Float — gentle levitation */
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50%       { transform: translateY(-6px); }
+  }
+
+  /* Glow ring — pulsing border glow */
+  @keyframes glowRing {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(22,163,74,0.4); }
+    50%       { box-shadow: 0 0 0 8px rgba(22,163,74,0); }
+  }
+
+  /* Gradient shift — animated gradient background */
+  @keyframes gradientShift {
+    0%   { background-position: 0% 50%; }
+    50%  { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+
+  /* Nav pop — icon spring on activation */
+  @keyframes navPop {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.25); }
+    70%  { transform: scale(0.92); }
+    100% { transform: scale(1.05); }
+  }
+
+  /* Confetti drop */
+  @keyframes confettiFall {
+    0%   { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+    100% { transform: translateY(80px) rotate(360deg); opacity: 0; }
+  }
+
+  /* Slide in from right */
+  @keyframes slideInRight {
+    from { opacity: 0; transform: translateX(20px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  /* Expand width — pill indicator */
+  @keyframes expandPill {
+    from { width: 8px; }
+    to   { width: 24px; }
+  }
+
+  .animate-fade-in-up     { animation: fadeInUp      0.35s cubic-bezier(0.22,1,0.36,1) both; }
+  .animate-fade-in        { animation: fadeIn         0.25s ease both; }
+  .animate-scale-in       { animation: scaleIn        0.35s cubic-bezier(0.22,1,0.36,1) both; }
+  .animate-pulse-glow     { animation: pulseGlow      1.8s ease-in-out infinite; }
+  .animate-spin-slow      { animation: spin           1.2s linear infinite; }
   .animate-shimmer        {
     background: linear-gradient(90deg, #f0f2f5 25%, #e4e7ea 50%, #f0f2f5 75%);
     background-size: 200% 100%;
     animation: shimmer 1.4s infinite;
   }
-  .animate-slide-up       { animation: slideUp   0.38s cubic-bezier(0.22,1,0.36,1) both; }
-  .animate-bounce-soft    { animation: bounceSoft 2s ease-in-out infinite; }
+  .animate-slide-up       { animation: slideUp        0.38s cubic-bezier(0.22,1,0.36,1) both; }
+  .animate-bounce-soft    { animation: bounceSoft     2s ease-in-out infinite; }
+  .animate-float          { animation: float          3s ease-in-out infinite; }
+  .animate-glow-ring      { animation: glowRing       2s ease-in-out infinite; }
+  .animate-gradient-shift {
+    background-size: 200% 200%;
+    animation: gradientShift 4s ease infinite;
+  }
+  .animate-nav-pop        { animation: navPop         0.4s cubic-bezier(0.22,1,0.36,1) both; }
+  .animate-slide-in-right { animation: slideInRight   0.3s cubic-bezier(0.22,1,0.36,1) both; }
 
   /* Stagger delays for list items */
   .stagger-1 { animation-delay: 0.05s; }
@@ -138,4 +282,6 @@
   .stagger-4 { animation-delay: 0.20s; }
   .stagger-5 { animation-delay: 0.25s; }
   .stagger-6 { animation-delay: 0.30s; }
+  .stagger-7 { animation-delay: 0.35s; }
+  .stagger-8 { animation-delay: 0.40s; }
 }

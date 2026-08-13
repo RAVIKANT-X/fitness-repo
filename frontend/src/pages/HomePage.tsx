@@ -13,7 +13,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronRight, Dumbbell, HeartHandshake,
-  Cpu, Flame, Activity, Star,
+  Cpu, Flame, Activity, Star, ScanLine,
 } from 'lucide-react'
 import { EXERCISE_LIBRARY } from '../features/exercise/exerciseLibrary'
 import { listSessions } from '../services/sessionService'
@@ -199,6 +199,55 @@ export default function HomePage() {
 
   return (
     <div className="space-y-5 pt-1 pb-2">
+
+      {/* ── 0. SCAN YOUR SPACE FEATURE CARD ──────────────────────────── */}
+      <button
+        onClick={() => navigate('/scan-space')}
+        className="w-full rounded-3xl overflow-hidden text-left active:scale-[0.98] transition-transform"
+        aria-label="Open Scan Your Space"
+        style={{
+          background: 'linear-gradient(135deg, #0f172a 0%, #1e3a5f 55%, #0e4fa1 100%)',
+          boxShadow: '0 4px 20px rgba(14,79,161,0.28)',
+        }}
+      >
+        <div className="relative px-5 pt-4 pb-5">
+          {/* Decorative circles */}
+          <div className="absolute -top-6 -right-6 w-32 h-32 rounded-full bg-white/5 pointer-events-none" />
+          <div className="absolute -bottom-4 -left-4 w-20 h-20 rounded-full bg-white/5 pointer-events-none" />
+
+          <div className="relative flex items-start gap-4">
+            {/* Icon */}
+            <div
+              className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 mt-0.5"
+              style={{ background: 'rgba(14,165,233,0.25)', border: '1px solid rgba(14,165,233,0.35)' }}
+            >
+              <ScanLine size={22} className="text-sky-300" aria-hidden="true" />
+            </div>
+
+            {/* Text */}
+            <div className="flex-1 min-w-0">
+              <div className="inline-flex items-center gap-1.5 bg-sky-400/15 rounded-full px-2.5 py-0.5 mb-1.5">
+                <span className="text-[10px] font-bold text-sky-300 uppercase tracking-wide">New</span>
+              </div>
+              <h2 className="text-white font-black text-lg leading-tight">Scan Your Space</h2>
+              <p className="text-sky-200/70 text-xs mt-1 leading-relaxed">
+                Let FitCoach understand your workspace and guide your posture.
+              </p>
+            </div>
+
+            {/* CTA */}
+            <div className="shrink-0 mt-1">
+              <div
+                className="flex items-center gap-1.5 rounded-2xl px-3 py-2"
+                style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.15)' }}
+              >
+                <span className="text-white font-bold text-xs">Scan</span>
+                <ChevronRight size={13} className="text-white/70" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </button>
 
       {/* ── 1. HERO BANNER ───────────────────────────────────────────── */}
       <div className="rounded-3xl overflow-hidden bg-primary relative">

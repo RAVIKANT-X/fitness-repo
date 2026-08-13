@@ -29,6 +29,7 @@ import { calculateExerciseAngles } from '../biomechanics/angles'
 import { areLandmarksVisible } from '../biomechanics/landmarkMapping'
 import { deriveFormStatus } from './deviationDetector'
 import { analyzeSquat, analyzePushUp, analyzeCurl } from './exerciseAnalyzers'
+import { analyzeGenericExercise, getOrInferConfig } from '../exercise/genericExerciseBridge'
 
 // ── Main entry point ──────────────────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ export function analyze(
   )
 
   // ── 3. Exercise-specific analysis ─────────────────────────────────────────
-  const nextState = dispatchAnalyzer(exerciseDef.id, angles, previousState)
+  const nextState = dispatchAnalyzer(exerciseDef.id, angles, previousState, exerciseDef)
 
   // ── 4. Form status ────────────────────────────────────────────────────────
   // During an in-progress rep: evaluate frame deviations
@@ -114,6 +115,7 @@ function dispatchAnalyzer(
   exerciseId: string,
   angles: ReturnType<typeof calculateExerciseAngles>,
   prev: AnalysisState,
+  exerciseDef?: ExerciseDefinition,
 ): AnalysisState {
   switch (exerciseId) {
     case 'squat':
@@ -123,7 +125,11 @@ function dispatchAnalyzer(
     case 'curl':
       return analyzeCurl(angles, prev)
     default:
-      // Unknown exercise — return previous state unchanged
+      // Custom / AI-generated exercise — use generic rep counter
+      if (exerciseDef) {
+        const config = getOrInferConfig(exerciseDef)
+        return analyzeGenericExercise(angles, prev, config)
+      }
       return prev
   }
 }

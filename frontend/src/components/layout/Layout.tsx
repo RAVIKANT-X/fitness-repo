@@ -2,8 +2,18 @@ import { Outlet, useLocation, NavLink } from 'react-router-dom'
 import { Home, Dumbbell, TrendingUp, User } from 'lucide-react'
 import BottomNav from './BottomNav'
 
-/** Routes where the top header is hidden entirely (camera-first pages). */
-const HEADER_HIDDEN_ROUTES = new Set(['/workout'])
+/**
+ * Routes where the mobile top header is hidden (camera-first full-screen pages).
+ * These pages also get no bottom padding from Layout — they manage their own
+ * safe-area clearance via the .camera-controls CSS class.
+ */
+const HEADER_HIDDEN_ROUTES = new Set(['/workout', '/calibrate', '/scan-space'])
+
+/** Returns true when the current path is a camera-first page. */
+function isCameraRoute(pathname: string): boolean {
+  return HEADER_HIDDEN_ROUTES.has(pathname)
+    || pathname.startsWith('/calibrate/')
+}
 
 /** Desktop sidebar nav items — mirrors BottomNav. */
 const sidebarItems = [
@@ -21,7 +31,7 @@ const sidebarItems = [
  */
 export default function Layout() {
   const { pathname } = useLocation()
-  const showHeader = !HEADER_HIDDEN_ROUTES.has(pathname)
+  const showHeader = !isCameraRoute(pathname)
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -95,14 +105,20 @@ export default function Layout() {
         {/* ── Page content ──────────────────────────────────────── */}
         <main
           className={[
-            'flex-1 overflow-y-auto',
-            // On desktop: centre within a comfortable reading/workout width
-            'md:max-w-[480px] md:mx-auto md:w-full',
-            // Horizontal padding
-            'px-4',
-            // Vertical padding — extra bottom on mobile to clear floating BottomNav
-            showHeader ? 'py-5 pb-36 md:pb-8' : 'pb-0',
+            'flex-1 md:max-w-[480px] md:mx-auto md:w-full',
+            showHeader
+              // Normal scrollable pages: horizontal padding + bottom clearance
+              // for the fixed BottomNav. Uses the CSS custom property so it
+              // stays in sync with the actual navbar height + device safe area.
+              ? 'overflow-y-auto px-4 py-5 md:pb-8'
+              // Camera pages: no padding at all — the page fills 100dvh itself
+              // and manages its own bottom clearance via .camera-controls.
+              : 'overflow-hidden p-0',
           ].join(' ')}
+          style={showHeader ? {
+            // scrollable pages: reserve space below last content item
+            paddingBottom: 'var(--page-bottom-clearance)',
+          } : undefined}
         >
           <Outlet />
         </main>

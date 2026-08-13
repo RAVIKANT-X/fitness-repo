@@ -10,7 +10,7 @@
  * All existing functionality is preserved.
  */
 
-import { useRef, useEffect, useCallback } from 'react'
+import { useRef, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Cpu, CheckCircle2, AlertTriangle,
@@ -19,17 +19,23 @@ import {
 import CameraView from '../components/workout/CameraView'
 import PoseOverlay from '../components/workout/PoseOverlay'
 import ReferenceGhostCanvas from '../components/workout/ReferenceGhostCanvas'
+import HumanValidationOverlay from '../components/workout/HumanValidationOverlay'
 import { useCamera } from '../hooks/useCamera'
 import { usePoseLandmarker } from '../hooks/usePoseLandmarker'
 import { useCalibration } from '../hooks/useCalibration'
 import { useReferenceComparison } from '../hooks/useReferenceComparison'
 import { getExerciseById } from '../features/exercise/exerciseLibrary'
 import { getTrueReference, getReferencePhase } from '../features/reference'
+import {
+  validateHumanScene,
+  ValidationSmoother,
+} from '../features/camera/humanValidation'
 import type { CameraError } from '../features/camera/cameraTypes'
 import type { MovementProfile, StepResult } from '../features/calibration/calibrationTypes'
 import type { FrameEvaluation } from '../features/calibration/calibrationEngine'
 import type { UsePoseLandmarkerReturn } from '../hooks/usePoseLandmarker'
 import type { ReferencePhase } from '../features/reference'
+import type { HumanSceneValidation } from '../features/camera/humanValidation'
 
 // ── Score helpers ─────────────────────────────────────────────────────────────
 
@@ -54,12 +60,22 @@ export default function CalibrationPage() {
   const { modelStatus, poses, startLoop, stopLoop } = usePoseLandmarker()
   const canvasRef = useRef<HTMLCanvasElement>(null!)
 
+  // ── Human scene validation ────────────────────────────────────────────────
+  const validationSmoother = useMemo(() => new ValidationSmoother(), [])
+  const humanScene: HumanSceneValidation = useMemo(() => {
+    const raw = validateHumanScene(poses, id)
+    return validationSmoother.update(raw)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [poses, id])
+
+  const humanValid = humanScene.canProceed
+
   const {
     stage, currentStepIndex, steps, stepResults,
     liveEval, consecutivePassFrames, holdFramesRequired, movementProfile,
     handleStartCalibration, handleAnalyzeStep, handleSkipStep,
     handleRetryStep, handleStartLive,
-  } = useCalibration({ poses, exercise: exercise ?? null })
+  } = useCalibration({ poses: humanValid ? poses : [], exercise: exercise ?? null })
 
   // ── Reference comparison (runs during STEP stage) ─────────────────────────
   const phaseForStep = STEP_PHASE_MAP[id ?? '']?.[currentStepIndex] as string | undefined
@@ -100,10 +116,10 @@ export default function CalibrationPage() {
   const userLandmarks = poses[0]?.landmarks ?? []
 
   return (
-    <div className="flex flex-col min-h-[calc(100vh-0px)] -mx-4 -mt-5 bg-background">
+    <div className="camera-page bg-background">
 
       {/* ── Top bar ──────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-4 py-3 bg-background border-b border-border shrink-0">
+      <div className="camera-page-header flex items-center justify-between px-4 py-3 bg-background border-b border-border">
         <button
           onClick={() => navigate(`/exercises/${exercise.id}`)}
           className="flex items-center gap-1.5 text-sm font-medium text-slate-600 active:opacity-70 min-h-[44px] pr-3"
@@ -163,6 +179,7 @@ export default function CalibrationPage() {
           isMatched={isMatched}
           primaryDeviation={primaryDeviation}
           liveComparison={liveComparison}
+          humanScene={humanScene}
         />
       )}
 
@@ -311,6 +328,7 @@ function StepView({
   startLoop, stopLoop,
   stepResults, onAnalyze, onSkip, onRetry, onSwitchCamera,
   referencePhase, userLandmarks, matchScore, isMatched, primaryDeviation, liveComparison,
+  humanScene,
 }: {
   stage: string
   currentStepIndex: number
@@ -339,6 +357,7 @@ function StepView({
   isMatched: boolean
   primaryDeviation: import('../features/reference').JointDeviation | null
   liveComparison: import('../features/reference').ReferenceComparison | null
+  humanScene: HumanSceneValidation
 }) {
   const currentStep = steps[currentStepIndex]
   if (!currentStep) return null
@@ -401,6 +420,21 @@ function StepView({
             )}
           </CameraView>
         </div>
+
+        {/* ── Human scene validation overlay ───────────────────────────── */}
+        {isActive && (
+          <HumanValidationOverlay
+            status={humanScene.status}
+            message={humanScene.message}
+            contextHint={
+              humanScene.status === 'NO_HUMAN'
+                ? 'Step into the camera frame.'
+                : undefined
+            }
+            personCount={humanScene.personCount}
+            position="bottom"
+          />
+        )}
 
         {/* ── TRUE REFERENCE label (top-left) ────────────────────────── */}
         {isActive && referencePhase && !isFailed && (
@@ -494,24 +528,16 @@ function StepView({
           </div>
         )}
 
-        {/* ── No-landmarks overlay ─────────────────────────────────────── */}
-        {isActive && !isFailed && !landmarksOk && (
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 pointer-events-none">
-            <div className="bg-black/70 backdrop-blur-sm text-white/80 text-xs px-4 py-2 rounded-full whitespace-nowrap">
-              Step into frame — full body needed
-            </div>
-          </div>
-        )}
       </div>
 
       {/* ── Controls (below camera) ───────────────────────────────────── */}
-      <div className="shrink-0 px-4 pb-5 pt-3 space-y-2 bg-background">
+      <div className="camera-controls px-4 pt-3 space-y-2 bg-background">
 
         {!isFailed && (
           <>
             <button
               onClick={onAnalyze}
-              disabled={!isActive || !landmarksOk}
+              disabled={!isActive || !landmarksOk || !humanScene.canProceed}
               className="w-full flex items-center justify-center gap-2 bg-primary text-white font-bold rounded-2xl py-4 min-h-[52px] active:bg-primary-dark disabled:opacity-40 transition-colors"
             >
               <Cpu size={18} />

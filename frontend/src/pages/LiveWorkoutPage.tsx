@@ -20,7 +20,7 @@
  * Voice coach: speaks each unique deviation message once every 4 s.
  */
 
-import { useRef, useEffect, useState, useCallback } from 'react'
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, FlipHorizontal, CameraOff, Camera,
@@ -29,6 +29,7 @@ import {
 import CameraView from '../components/workout/CameraView'
 import PoseOverlay from '../components/workout/PoseOverlay'
 import ReferenceGhostCanvas from '../components/workout/ReferenceGhostCanvas'
+import HumanValidationOverlay from '../components/workout/HumanValidationOverlay'
 import { useCamera } from '../hooks/useCamera'
 import { usePoseLandmarker } from '../hooks/usePoseLandmarker'
 import { useSelectedExercise } from '../hooks/useSelectedExercise'
@@ -36,7 +37,12 @@ import { useAnalysis } from '../hooks/useAnalysis'
 import { useReferenceComparison } from '../hooks/useReferenceComparison'
 import { useVoiceCoach } from '../hooks/useVoiceCoach'
 import { saveSession } from '../services/sessionService'
-import { getReferencePhase } from '../features/reference'
+import { getReferencePhase, getTrueReference } from '../features/reference'
+import {
+  validateHumanScene,
+  ValidationSmoother,
+  getValidationTtsMessage,
+} from '../features/camera/humanValidation'
 import type { Deviation, MovementPhase, FormStatus } from '../features/analysis/analysisTypes'
 import type { JointAngles } from '../features/biomechanics/biomechanicsTypes'
 
@@ -73,7 +79,21 @@ export default function LiveWorkoutPage() {
   const { modelStatus, poses, startLoop, stopLoop } = usePoseLandmarker()
   const canvasRef = useRef<HTMLCanvasElement>(null!)
 
-  const { analysisResult, resetAnalysis } = useAnalysis({ poses, selectedExercise, isActive })
+  // ── Human scene validation (shared gate) ──────────────────────────────────
+  const validationSmoother = useMemo(() => new ValidationSmoother(), [])
+  const humanScene = useMemo(() => {
+    const raw = validateHumanScene(poses, selectedExercise?.id)
+    return validationSmoother.update(raw)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [poses, selectedExercise?.id])
+
+  const humanValid = humanScene.canProceed
+
+  const { analysisResult, resetAnalysis } = useAnalysis({
+    poses: humanValid ? poses : [],
+    selectedExercise,
+    isActive,
+  })
   const voice = useVoiceCoach()
 
   // ── True Reference comparison ─────────────────────────────────────────────
@@ -85,12 +105,14 @@ export default function LiveWorkoutPage() {
     isActive,
   })
 
-  // Reference ghost: get the pose for the current movement phase
+  // Reference ghost: full TrueReference for phase-synchronised ghost
+  const trueReference = selectedExercise ? getTrueReference(selectedExercise.id) : undefined
   const refPhase = selectedExercise && currentPhase !== 'UNKNOWN' && currentPhase !== 'INVALID'
     ? getReferencePhase(selectedExercise.id, currentPhase)
     : null
   const userLandmarks = poses[0]?.landmarks ?? []
   const mirrored = facing === 'user'
+
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const sessionStartRef = useRef(new Date().toISOString())
@@ -112,6 +134,16 @@ export default function LiveWorkoutPage() {
     const topDev = devs.find((d) => d.severity === 'ERROR') ?? devs[0]
     voice.speak(deviationText(topDev.id))
   }, [analysisResult?.activeDeviations, voice])
+
+  // ── Voice: human validation status announcements ────────────────────────
+  const lastSpokenSceneStatus = useRef<string>('')
+  useEffect(() => {
+    if (!voice.enabled || !isActive) return
+    const tts = getValidationTtsMessage(humanScene.status)
+    if (!tts || tts === lastSpokenSceneStatus.current) return
+    lastSpokenSceneStatus.current = tts
+    voice.speak(tts)
+  }, [humanScene.status, voice.enabled, isActive, voice])
 
   const handleStart  = () => start('user')
   const handleStop   = () => { stop(); stopLoop() }
@@ -166,15 +198,14 @@ export default function LiveWorkoutPage() {
   const phase        = analysisResult?.currentPhase ?? 'UNKNOWN'
   const landmarksOk  = analysisResult?.landmarksValid ?? false
   const angles       = analysisResult?.angles ?? {}
-  const personVisible = poses.length > 0 && poses[0].landmarks.length > 0
 
   const canFinish    = isActive && selectedExercise && repCount > 0 && saveStatus === 'idle'
 
   return (
-    <div className="flex flex-col h-screen -mx-4 -mt-5 bg-black overflow-hidden">
+    <div className="camera-page">
 
       {/* ── Top bar ──────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-black/80 backdrop-blur-sm shrink-0 z-10">
+      <div className="camera-page-header flex items-center justify-between px-4 py-2.5 bg-black/80 backdrop-blur-sm">
         <button
           onClick={() => navigate(selectedExercise ? `/exercises/${selectedExercise.id}` : '/exercises')}
           className="flex items-center gap-1.5 text-sm font-medium text-white/80 active:opacity-70 min-h-[44px] pr-3"
@@ -198,7 +229,7 @@ export default function LiveWorkoutPage() {
       </div>
 
       {/* ── FULL-SCREEN CAMERA ────────────────────────────────────────────── */}
-      <div className="relative flex-1 min-h-0">
+      <div className="camera-section">
 
         {/* Camera + skeleton fill all remaining height */}
         <div className="absolute inset-0">
@@ -213,16 +244,19 @@ export default function LiveWorkoutPage() {
               startLoop={startLoop}
               stopLoop={stopLoop}
             />
-            {/* TRUE REFERENCE ghost skeleton — overlaid on user */}
-            {refPhase && isActive && (
+            {/* TRUE REFERENCE ghost skeleton — phase-synchronised, body-adapted */}
+            {isActive && humanValid && (refPhase || trueReference) && (
               <ReferenceGhostCanvas
                 videoRef={videoRef}
-                referenceLandmarks={refPhase.pose}
+                referenceLandmarks={refPhase?.pose ?? []}
+                trueReference={trueReference}
+                currentPhase={currentPhase}
+                exerciseId={selectedExercise?.id ?? ''}
                 userLandmarks={userLandmarks}
                 deviations={liveComparison?.jointDeviations ?? []}
                 mirrored={mirrored}
-                opacity={0.65}
-                visible
+                opacity={0.70}
+                visible={humanValid}
               />
             )}
           </CameraView>
@@ -312,22 +346,19 @@ export default function LiveWorkoutPage() {
           </div>
         )}
 
-        {/* ── "Adjust position" badge ───────────────────────────────────── */}
-        {isActive && !landmarksOk && personVisible && (
-          <div className="absolute bottom-36 left-1/2 -translate-x-1/2 pointer-events-none">
-            <div className="bg-amber-400/85 text-amber-900 text-xs font-bold px-4 py-2 rounded-full whitespace-nowrap">
-              Adjust position — body not fully visible
-            </div>
-          </div>
-        )}
-
-        {/* ── Waiting badge ─────────────────────────────────────────────── */}
-        {isActive && !personVisible && (
-          <div className="absolute bottom-36 left-1/2 -translate-x-1/2 pointer-events-none">
-            <div className="bg-black/60 text-white/70 text-xs px-4 py-2 rounded-full whitespace-nowrap">
-              Waiting for pose…
-            </div>
-          </div>
+        {/* ── Human scene validation overlay ───────────────────────────── */}
+        {isActive && (
+          <HumanValidationOverlay
+            status={humanScene.status}
+            message={humanScene.message}
+            contextHint={
+              humanScene.status === 'NO_HUMAN'
+                ? 'Step into the camera frame.'
+                : undefined
+            }
+            personCount={humanScene.personCount}
+            position="bottom"
+          />
         )}
 
         {/* ── Rep counter + form status strip — bottom of camera ────────── */}
@@ -342,7 +373,7 @@ export default function LiveWorkoutPage() {
       </div>
 
       {/* ── Bottom controls bar ───────────────────────────────────────────── */}
-      <div className="shrink-0 bg-black px-4 pb-6 pt-3 space-y-2">
+      <div className="camera-controls bg-black px-4 pt-3 space-y-2">
 
         {/* Camera controls row */}
         <div className="flex gap-2">

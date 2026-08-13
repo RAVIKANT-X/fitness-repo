@@ -15,3 +15,9 @@ export type {
 export { getTrueReference, getReferencePhase } from './referenceLibrary'
 export { compareToReference, smoothMatchScore } from './referenceEngine'
 export { renderReferencGhost, renderReferenceOnly } from './referenceRenderer'
+export {
+  resolveGhostPose,
+  computeBodyFrame,
+  smoothLandmarks,
+  interpolatePoses,
+} from './ghostSync'
