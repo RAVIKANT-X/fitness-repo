@@ -572,6 +572,7 @@ function StepView({
 
         {!isFailed && (
           <>
+            {/* Primary: AI scores your current pose */}
             <button
               onClick={onAnalyze}
               disabled={!isActive || !landmarksOk || !humanScene.canProceed}
@@ -580,12 +581,14 @@ function StepView({
               <Cpu size={18} />
               Analyze Step
             </button>
+
+            {/* Secondary: skip scoring and move to the next step */}
             <button
               onClick={onSkip}
-              className="w-full flex items-center justify-center gap-2 border border-slate-200 text-slate-600 font-semibold rounded-2xl py-3 min-h-[48px] active:bg-slate-50 transition-colors"
+              className="w-full flex items-center justify-center gap-2 bg-slate-800 text-white font-semibold rounded-2xl py-3.5 min-h-[52px] active:bg-slate-700 transition-colors"
             >
-              <SkipForward size={16} />
-              Skip Step
+              <span className="text-sm">Next Step</span>
+              <ChevronRight size={17} />
             </button>
           </>
         )}

@@ -48,3 +48,4 @@ npm-debug.log*
 
 # PostgreSQL data (managed by Docker volume)
 database/data/
+.vercel
