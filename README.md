@@ -1,5 +1,7 @@
 # FitCoach AI
 
+deployed at: https://frontend-ten-tau-gtr8avnbun.vercel.app
+
 ### AI-Powered Fitness, Posture & Movement Coach
 
 FitCoach AI is a mobile-first AI fitness and posture coaching application that uses computer vision to understand human movement in real time.
