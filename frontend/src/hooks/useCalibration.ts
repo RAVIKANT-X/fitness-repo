@@ -3,13 +3,21 @@
  *
  * Flow:  EXPLAIN → STEP (per step) → STEP_FAILED → REPORT → LIVE
  *
- * Manual controls (new):
- *   handleAnalyzeStep  — user taps "Analyze Step": snapshot current pose,
- *                        score it, pass or show correction.
+ * Manual controls:
+ *   handleAnalyzeStep  — starts a 10-second timed analysis window.
+ *                        Pose frames are sampled every ~333 ms.
+ *                        At the end the average score is evaluated:
+ *                          ≥ 60  → PASS  → advance to next step
+ *                          < 60  → FAIL  → STEP_FAILED with correction
  *   handleSkipStep     — user skips: records a 100-score pass with no issues.
  *
  * Auto-advance is kept as a fallback: if the user holds the position correctly
  * for holdFrames consecutive frames it still passes automatically.
+ *
+ * Timed-analysis state exposed to UI:
+ *   isAnalysing      — true while the 10-second window is open
+ *   analyseSecondsLeft — countdown integer (10 → 0)
+ *   analysePct       — 0 → 100 fill for a progress bar (time-based)
  */
 
 import { useRef, useState, useEffect, useCallback } from 'react'
@@ -28,7 +36,9 @@ import {
 import { getStepsForExercise } from '../features/calibration/exerciseSteps'
 import type { FrameEvaluation } from '../features/calibration/calibrationEngine'
 
-const DEFAULT_HOLD_FRAMES = 20    // auto-advance: ~0.67 s at 30 fps
+const DEFAULT_HOLD_FRAMES  = 20     // auto-advance: ~0.67 s at 30 fps
+const ANALYSE_DURATION_MS  = 10_000 // 10-second timed analysis window
+const ANALYSE_PASS_SCORE   = 60     // minimum average score to pass
 
 interface UseCalibrationOptions {
   poses: PoseResult[]
@@ -44,9 +54,15 @@ interface UseCalibrationReturn {
   consecutivePassFrames: number
   holdFramesRequired: number
   movementProfile: MovementProfile | null
+  /** Whether the 10-second timed analysis is currently running. */
+  isAnalysing: boolean
+  /** Countdown seconds remaining (10 → 0). */
+  analyseSecondsLeft: number
+  /** 0 → 100 fill percentage for a progress bar (time elapsed). */
+  analysePct: number
   /** User confirmed they read the explanation → start step 0. */
   handleStartCalibration: () => void
-  /** Manually trigger analysis of the current pose snapshot. */
+  /** Start the 10-second timed analysis window. */
   handleAnalyzeStep: () => void
   /** Skip the current step entirely (records a perfect score). */
   handleSkipStep: () => void
@@ -69,6 +85,11 @@ export function useCalibration({
   const [consecutivePassFrames, setConsPass]      = useState(0)
   const [movementProfile, setMovementProfile]     = useState<MovementProfile | null>(null)
 
+  // ── Timed-analysis state ──────────────────────────────────────────────────
+  const [isAnalysing, setIsAnalysing]             = useState(false)
+  const [analyseSecondsLeft, setAnalyseSecondsLeft] = useState(ANALYSE_DURATION_MS / 1000)
+  const [analysePct, setAnalysePct]               = useState(0)
+
   // ── Refs (frame-hot-path — never cause re-renders) ────────────────────────
   const consecutivePassRef    = useRef(0)
   const frameScoreWindowRef   = useRef<number[]>([])
@@ -79,13 +100,39 @@ export function useCalibration({
   const latestPosesRef        = useRef<PoseResult[]>([])
   const latestEvalRef         = useRef<FrameEvaluation | null>(null)
 
+  // ── Timed-analysis refs ───────────────────────────────────────────────────
+  const isAnalysingRef        = useRef(false)
+  const analyseFramesRef      = useRef<number[]>([])   // collected frame scores
+  const analyseEndTimeRef     = useRef<number>(0)
+  const analyseTimerRef       = useRef<ReturnType<typeof setInterval> | null>(null)
+
   // Keep refs in sync with state
   useEffect(() => { stageRef.current = stage }, [stage])
   useEffect(() => { currentStepIndexRef.current = currentStepIndex }, [currentStepIndex])
   useEffect(() => { latestPosesRef.current = poses }, [poses])
 
+  // ── Clear any running timer ────────────────────────────────────────────────
+  const clearAnalyseTimer = useCallback(() => {
+    if (analyseTimerRef.current !== null) {
+      clearInterval(analyseTimerRef.current)
+      analyseTimerRef.current = null
+    }
+  }, [])
+
+  // ── Reset timed-analysis state ────────────────────────────────────────────
+  const resetAnalysis = useCallback(() => {
+    clearAnalyseTimer()
+    isAnalysingRef.current = false
+    analyseFramesRef.current = []
+    analyseEndTimeRef.current = 0
+    setIsAnalysing(false)
+    setAnalyseSecondsLeft(ANALYSE_DURATION_MS / 1000)
+    setAnalysePct(0)
+  }, [clearAnalyseTimer])
+
   // ── Reset on exercise change ───────────────────────────────────────────────
   useEffect(() => {
+    resetAnalysis()
     setStage('EXPLAIN');              stageRef.current = 'EXPLAIN'
     setCurrentStepIndex(0);           currentStepIndexRef.current = 0
     setStepResults([])
@@ -95,7 +142,10 @@ export function useCalibration({
     frameScoreWindowRef.current = []
     frameCountRef.current = 0
     stepAttemptsRef.current = []
-  }, [exercise?.id])
+  }, [exercise?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Cleanup on unmount ────────────────────────────────────────────────────
+  useEffect(() => () => { clearAnalyseTimer() }, [clearAnalyseTimer])
 
   // ── Shared: advance to next step or finish ────────────────────────────────
   const advanceStep = useCallback((
@@ -132,7 +182,58 @@ export function useCalibration({
     }
   }, [steps.length])
 
-  // ── Per-frame analysis loop (auto-advance on hold) ────────────────────────
+  // ── Finalise timed analysis (called when 10s window closes) ──────────────
+  const finaliseAnalysis = useCallback(() => {
+    if (!isAnalysingRef.current) return
+    resetAnalysis()
+
+    if (!exercise || steps.length === 0) return
+    const stepIndex = currentStepIndexRef.current
+    const step = steps[stepIndex]
+    if (!step) return
+
+    const frames = analyseFramesRef.current
+    const attempts = (stepAttemptsRef.current[stepIndex] ?? 0) + 1
+    stepAttemptsRef.current[stepIndex] = attempts
+
+    // Average all collected frame scores (or use latest eval as fallback)
+    const avgScore = frames.length > 0
+      ? averageFrameScores(frames)
+      : (latestEvalRef.current?.frameScore ?? 0)
+
+    const eval_ = latestEvalRef.current
+
+    if (avgScore >= ANALYSE_PASS_SCORE && (eval_?.landmarksValid ?? false)) {
+      // Pass
+      const result: StepResult = { step, score: avgScore, issues: [], passed: true, attempts }
+      setStepResults((prev) => {
+        const newResults = [...prev, result]
+        consecutivePassRef.current = 0
+        frameScoreWindowRef.current = []
+        frameCountRef.current = 0
+        setConsPass(0)
+        advanceStep(newResults, stepIndex + 1, exercise.id, exercise.name)
+        return newResults
+      })
+    } else {
+      // Fail
+      const score = Math.max(0, avgScore - 5)
+      const issues = eval_ ? buildStepIssues(eval_) : []
+      const failResult: StepResult = { step, score, issues, passed: false, attempts }
+      setStepResults((prev) => {
+        const n = [...prev]
+        n[stepIndex] = failResult
+        return n
+      })
+      frameCountRef.current = 0
+      consecutivePassRef.current = 0
+      frameScoreWindowRef.current = []
+      setConsPass(0)
+      setStage('STEP_FAILED');  stageRef.current = 'STEP_FAILED'
+    }
+  }, [exercise, steps, advanceStep, resetAnalysis])
+
+  // ── Per-frame analysis loop (auto-advance + collect timed frames) ─────────
   useEffect(() => {
     if (stageRef.current !== 'STEP') return
     if (!exercise || steps.length === 0) return
@@ -146,79 +247,78 @@ export function useCalibration({
     latestEvalRef.current = eval_
     setLiveEval(eval_)
 
-    const holdRequired = step.holdFrames ?? DEFAULT_HOLD_FRAMES
-    frameCountRef.current += 1
+    // ── Collect frame scores during timed analysis ─────────────────────────
+    if (isAnalysingRef.current && eval_.landmarksValid) {
+      analyseFramesRef.current.push(eval_.frameScore)
+    }
 
-    if (eval_.passing && eval_.landmarksValid) {
-      consecutivePassRef.current += 1
-      frameScoreWindowRef.current.push(eval_.frameScore)
-      setConsPass(consecutivePassRef.current)
+    // ── Auto-advance on hold (unchanged) ──────────────────────────────────
+    // Do not count auto-advance frames during timed analysis to avoid
+    // double-advancing.
+    if (!isAnalysingRef.current) {
+      const holdRequired = step.holdFrames ?? DEFAULT_HOLD_FRAMES
+      frameCountRef.current += 1
 
-      if (consecutivePassRef.current >= holdRequired) {
-        // Auto-advance
-        const score   = averageFrameScores(frameScoreWindowRef.current)
-        const attempts = stepAttemptsRef.current[stepIndex] ?? 1
-        const result: StepResult = { step, score, issues: [], passed: true, attempts }
-        const newResults = [...stepResults, result]
-        setStepResults(newResults)
-        advanceStep(newResults, stepIndex + 1, exercise.id, exercise.name)
+      if (eval_.passing && eval_.landmarksValid) {
+        consecutivePassRef.current += 1
+        frameScoreWindowRef.current.push(eval_.frameScore)
+        setConsPass(consecutivePassRef.current)
+
+        if (consecutivePassRef.current >= holdRequired) {
+          // Auto-advance
+          const score    = averageFrameScores(frameScoreWindowRef.current)
+          const attempts = stepAttemptsRef.current[stepIndex] ?? 1
+          const result: StepResult = { step, score, issues: [], passed: true, attempts }
+          const newResults = [...stepResults, result]
+          setStepResults(newResults)
+          advanceStep(newResults, stepIndex + 1, exercise.id, exercise.name)
+        }
+      } else {
+        consecutivePassRef.current = 0
+        frameScoreWindowRef.current = []
+        setConsPass(0)
       }
-    } else {
-      consecutivePassRef.current = 0
-      frameScoreWindowRef.current = []
-      setConsPass(0)
     }
   }, [poses, exercise, steps, stepResults, advanceStep])
 
-  // ── handleAnalyzeStep — manual snapshot & score ──────────────────────────
+  // ── handleAnalyzeStep — start 10-second timed analysis ───────────────────
   const handleAnalyzeStep = useCallback(() => {
     if (stageRef.current !== 'STEP') return
     if (!exercise || steps.length === 0) return
+    if (isAnalysingRef.current) return   // already running
 
-    const stepIndex = currentStepIndexRef.current
-    const step = steps[stepIndex]
-    if (!step) return
+    analyseFramesRef.current = []
+    isAnalysingRef.current = true
+    setIsAnalysing(true)
 
-    const poses_ = latestPosesRef.current
-    if (poses_.length === 0 || poses_[0].landmarks.length === 0) return
+    const endTime = Date.now() + ANALYSE_DURATION_MS
+    analyseEndTimeRef.current = endTime
 
-    const eval_ = evaluateFrame(poses_[0].landmarks, step)
-    latestEvalRef.current = eval_
-    setLiveEval(eval_)
+    setAnalyseSecondsLeft(ANALYSE_DURATION_MS / 1000)
+    setAnalysePct(0)
 
-    const attempts = (stepAttemptsRef.current[stepIndex] ?? 0) + 1
-    stepAttemptsRef.current[stepIndex] = attempts
+    // Tick every 100 ms to update countdown + progress bar
+    analyseTimerRef.current = setInterval(() => {
+      const remaining = Math.max(0, analyseEndTimeRef.current - Date.now())
+      const secondsLeft = Math.ceil(remaining / 1000)
+      const pct = Math.round(((ANALYSE_DURATION_MS - remaining) / ANALYSE_DURATION_MS) * 100)
 
-    if (eval_.passing && eval_.landmarksValid) {
-      // Pass
-      const score = eval_.frameScore
-      const result: StepResult = { step, score, issues: [], passed: true, attempts }
-      const newResults = [...stepResults, result]
-      setStepResults(newResults)
-      consecutivePassRef.current = 0
-      frameScoreWindowRef.current = []
-      frameCountRef.current = 0
-      setConsPass(0)
-      advanceStep(newResults, stepIndex + 1, exercise.id, exercise.name)
-    } else {
-      // Fail — show correction
-      const score = Math.max(0, eval_.frameScore - 5)
-      const failResult: StepResult = {
-        step, score,
-        issues: buildStepIssues(eval_),
-        passed: false, attempts,
+      setAnalyseSecondsLeft(secondsLeft)
+      setAnalysePct(pct)
+
+      if (remaining <= 0) {
+        // Time's up — finalise in next microtask so state above flushes first
+        clearInterval(analyseTimerRef.current!)
+        analyseTimerRef.current = null
+        // Use setTimeout(0) to let React batch the state updates before we mutate more state
+        setTimeout(() => { finaliseAnalysis() }, 0)
       }
-      setStepResults((prev) => { const n = [...prev]; n[stepIndex] = failResult; return n })
-      frameCountRef.current = 0
-      consecutivePassRef.current = 0
-      frameScoreWindowRef.current = []
-      setConsPass(0)
-      setStage('STEP_FAILED');  stageRef.current = 'STEP_FAILED'
-    }
-  }, [exercise, steps, stepResults, advanceStep])
+    }, 100)
+  }, [exercise, steps, finaliseAnalysis])
 
   // ── handleSkipStep — record a perfect pass and move on ────────────────────
   const handleSkipStep = useCallback(() => {
+    resetAnalysis()
     if (!exercise || steps.length === 0) return
     const stepIndex = currentStepIndexRef.current
     const step = steps[stepIndex]
@@ -238,10 +338,11 @@ export function useCalibration({
     stageRef.current = 'STEP'
     setStage('STEP')
     advanceStep(newResults, stepIndex + 1, exercise.id, exercise.name)
-  }, [exercise, steps, stepResults, advanceStep])
+  }, [exercise, steps, stepResults, advanceStep, resetAnalysis])
 
   // ── handleStartCalibration ────────────────────────────────────────────────
   const handleStartCalibration = useCallback(() => {
+    resetAnalysis()
     consecutivePassRef.current = 0
     frameScoreWindowRef.current = []
     frameCountRef.current = 0
@@ -250,22 +351,24 @@ export function useCalibration({
     setCurrentStepIndex(0);  currentStepIndexRef.current = 0
     setConsPass(0)
     setStage('STEP');  stageRef.current = 'STEP'
-  }, [])
+  }, [resetAnalysis])
 
   // ── handleRetryStep ───────────────────────────────────────────────────────
   const handleRetryStep = useCallback(() => {
+    resetAnalysis()
     consecutivePassRef.current = 0
     frameScoreWindowRef.current = []
     frameCountRef.current = 0
     setConsPass(0)
     setStepResults((prev) => prev.slice(0, currentStepIndexRef.current))
     setStage('STEP');  stageRef.current = 'STEP'
-  }, [])
+  }, [resetAnalysis])
 
   // ── handleStartLive ───────────────────────────────────────────────────────
   const handleStartLive = useCallback(() => {
+    resetAnalysis()
     setStage('LIVE');  stageRef.current = 'LIVE'
-  }, [])
+  }, [resetAnalysis])
 
   const holdFramesRequired = steps[currentStepIndex]?.holdFrames ?? DEFAULT_HOLD_FRAMES
 
@@ -273,6 +376,7 @@ export function useCalibration({
     stage, currentStepIndex, steps, stepResults,
     liveEval, consecutivePassFrames, holdFramesRequired,
     movementProfile,
+    isAnalysing, analyseSecondsLeft, analysePct,
     handleStartCalibration,
     handleAnalyzeStep,
     handleSkipStep,

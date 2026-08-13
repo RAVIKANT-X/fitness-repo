@@ -120,28 +120,39 @@
    */
   .camera-controls {
     /*
-     * flex-shrink: 0 is the default — we keep it here explicitly.
-     * However, on the CalibrationPage the failed-state card + buttons
-     * can be taller than what the screen has available. We therefore add a
-     * max-height so the bar can scroll internally rather than overflowing
-     * behind the BottomNav.
-     *
-     *   45vh covers Analyze+Skip buttons comfortably on all phone sizes.
-     *   overflow-y: auto lets the bar grow up to that limit and then scroll.
-     *   flex-shrink: 0 is still set so the camera section does not grow into
-     *   the controls area.
+     * flex-shrink: 0 keeps this bar from being compressed by the camera section.
+     * max-height: 42vh — slightly reduced from 45vh to give the camera more room
+     *   on small phones. overflow-y: auto lets the bar scroll internally when
+     *   the failed-state card + buttons exceed this limit.
      */
     flex-shrink: 0;
     z-index: 20;
-    max-height: 45vh;
+    max-height: 42vh;
     overflow-y: auto;
     /*
      * Reserve space above BottomNav:
      *   --nav-height  = 64px  (pill height including its own padding)
      *   --safe-bottom = env(safe-area-inset-bottom, 0px)
-     *   extra 4px     = small breathing gap above the pill
+     *   12px          = minimum breathing gap (was 4px — increased for reliability)
+     *   8px           = extra cushion so the last button never clips the pill
+     *
+     * Total minimum: 64 + 12 + 8 = 84px
+     * On iPhone with 34px safe area: 64 + 34 + 8 = 106px
+     * On Android gesture bar ~24px:  64 + 24 + 8 = 96px
      */
-    padding-bottom: calc(var(--nav-height) + max(var(--safe-bottom), 4px) + 4px);
+    padding-bottom: calc(var(--nav-height) + max(var(--safe-bottom), 12px) + 8px);
+  }
+
+  /*
+   * Step-info block inside a camera-page (step title + instruction).
+   * Caps height so it never steals too much vertical space from the camera
+   * on small phones. Text is clipped rather than scrolled — instructions
+   * are short by design.
+   */
+  .camera-step-info {
+    flex-shrink: 0;
+    max-height: 88px;
+    overflow: hidden;
   }
 
   /* Hide scrollbar but keep scroll behaviour (for filter pills etc.) */

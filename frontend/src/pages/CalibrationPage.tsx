@@ -74,6 +74,7 @@ export default function CalibrationPage() {
   const {
     stage, currentStepIndex, steps, stepResults,
     liveEval, consecutivePassFrames, holdFramesRequired, movementProfile,
+    isAnalysing, analyseSecondsLeft, analysePct,
     handleStartCalibration, handleAnalyzeStep, handleSkipStep,
     handleRetryStep, handleStartLive,
   } = useCalibration({ poses: humanValid ? poses : [], exercise: exercise ?? null })
@@ -181,6 +182,9 @@ export default function CalibrationPage() {
           primaryDeviation={primaryDeviation}
           liveComparison={liveComparison}
           humanScene={humanScene}
+          isAnalysing={isAnalysing}
+          analyseSecondsLeft={analyseSecondsLeft}
+          analysePct={analysePct}
         />
       )}
 
@@ -352,6 +356,7 @@ function StepView({
   stepResults, onAnalyze, onSkip, onRetry, onSwitchCamera,
   referencePhase, userLandmarks, matchScore, isMatched, primaryDeviation, liveComparison,
   humanScene,
+  isAnalysing, analyseSecondsLeft, analysePct,
 }: {
   stage: string
   currentStepIndex: number
@@ -381,6 +386,9 @@ function StepView({
   primaryDeviation: import('../features/reference').JointDeviation | null
   liveComparison: import('../features/reference').ReferenceComparison | null
   humanScene: HumanSceneValidation
+  isAnalysing: boolean
+  analyseSecondsLeft: number
+  analysePct: number
 }) {
   const currentStep = steps[currentStepIndex]
   if (!currentStep) return null
@@ -537,23 +545,37 @@ function StepView({
           </div>
         )}
 
-        {/* ── Hold progress overlay ────────────────────────────────────── */}
+        {/* ── Hold / analyse progress overlay ─────────────────────────── */}
         {isActive && !isFailed && landmarksOk && (
           <div className="absolute bottom-3 left-3 right-3 pointer-events-none">
             <div className="bg-black/65 backdrop-blur-sm rounded-xl px-3 py-2">
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs text-white/80 font-medium">
-                  {passing ? '✓ Hold position…' : 'Align with reference'}
-                </span>
-                <span className="text-xs text-white/50 tabular-nums">{holdPct}%</span>
+                {isAnalysing ? (
+                  <>
+                    <span className="text-xs text-white font-bold flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-primary animate-pulse inline-block" />
+                      Analysing…
+                    </span>
+                    <span className="text-xs font-black text-primary tabular-nums">
+                      {analyseSecondsLeft}s
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-xs text-white/80 font-medium">
+                      {passing ? '✓ Hold position…' : 'Align with reference'}
+                    </span>
+                    <span className="text-xs text-white/50 tabular-nums">{holdPct}%</span>
+                  </>
+                )}
               </div>
               <div className="w-full h-2 bg-white/20 rounded-full overflow-hidden">
                 <div
                   className={[
                     'h-full rounded-full transition-all duration-150',
-                    passing ? 'bg-emerald-400' : 'bg-slate-400',
+                    isAnalysing ? 'bg-primary' : passing ? 'bg-emerald-400' : 'bg-slate-400',
                   ].join(' ')}
-                  style={{ width: `${holdPct}%` }}
+                  style={{ width: `${isAnalysing ? analysePct : holdPct}%` }}
                 />
               </div>
             </div>
@@ -572,20 +594,45 @@ function StepView({
 
         {!isFailed && (
           <>
-            {/* Primary: AI scores your current pose */}
+            {/* Primary: starts the 10-second timed analysis window */}
             <button
               onClick={onAnalyze}
-              disabled={!isActive || !landmarksOk || !humanScene.canProceed}
-              className="w-full flex items-center justify-center gap-2 bg-primary text-white font-bold rounded-2xl py-4 min-h-[52px] active:bg-primary-dark disabled:opacity-40 transition-colors"
+              disabled={!isActive || !landmarksOk || !humanScene.canProceed || isAnalysing}
+              className={[
+                'w-full flex items-center justify-center gap-2 font-bold rounded-2xl min-h-[52px] transition-all overflow-hidden relative',
+                isAnalysing
+                  ? 'bg-primary/20 text-primary border border-primary/40'
+                  : 'bg-primary text-white py-4 active:bg-primary-dark disabled:opacity-40',
+              ].join(' ')}
+              style={isAnalysing ? { padding: '0' } : {}}
             >
-              <Cpu size={18} />
-              Analyze Step
+              {isAnalysing ? (
+                /* Countdown button — fills left-to-right as time passes */
+                <>
+                  {/* Animated fill bar behind the text */}
+                  <span
+                    className="absolute inset-0 bg-primary/30 rounded-2xl transition-all duration-100"
+                    style={{ width: `${analysePct}%` }}
+                  />
+                  <span className="relative z-10 flex items-center gap-2 py-4">
+                    <Cpu size={18} className="animate-pulse" />
+                    <span>Analysing…</span>
+                    <span className="text-lg font-black tabular-nums">{analyseSecondsLeft}s</span>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Cpu size={18} />
+                  Analyze Step
+                </>
+              )}
             </button>
 
             {/* Secondary: skip scoring and move to the next step */}
             <button
               onClick={onSkip}
-              className="w-full flex items-center justify-center gap-2 bg-slate-800 text-white font-semibold rounded-2xl py-3.5 min-h-[52px] active:bg-slate-700 transition-colors"
+              disabled={isAnalysing}
+              className="w-full flex items-center justify-center gap-2 bg-slate-800 text-white font-semibold rounded-2xl py-3.5 min-h-[52px] active:bg-slate-700 disabled:opacity-40 transition-colors"
             >
               <span className="text-sm">Next Step</span>
               <ChevronRight size={17} />
