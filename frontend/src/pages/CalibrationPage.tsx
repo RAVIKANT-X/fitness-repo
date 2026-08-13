@@ -209,110 +209,132 @@ function ExplainView({
   onStart: () => void
 }) {
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-5 space-y-5">
-      {/* Hero with True Reference badge */}
-      <div
-        className="rounded-2xl p-5"
-        style={{ background: 'linear-gradient(135deg, rgba(22,163,74,0.08), rgba(34,197,94,0.04))', border: '1px solid rgba(34,197,94,0.20)' }}
-      >
-        <div className="flex items-center gap-2 mb-2">
-          <Cpu size={16} className="text-primary" />
-          <span className="text-xs font-bold text-primary uppercase tracking-wide">AI Calibration</span>
-          <span
-            className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full"
-            style={{ background: 'rgba(34,197,94,0.15)', color: '#15803d', border: '1px solid rgba(34,197,94,0.30)' }}
-          >
-            ✦ TRUE REFERENCE
-          </span>
-        </div>
-        <h1 className="text-xl font-bold text-slate-900 mb-1">{exercise.name}</h1>
-        <p className="text-sm text-slate-600 leading-relaxed">
-          I'll guide you through <strong>{steps.length} key positions</strong> using a{' '}
-          <strong>True Reference skeleton</strong> — ideal form landmarks you can visually align with.
-        </p>
-      </div>
+    /*
+     * Outer wrapper: flex column so the scroll area + floating button bar
+     * together fill the flex-1 space inside .camera-page.
+     */
+    <div className="flex-1 flex flex-col min-h-0">
 
-      {/* Steps list with reference phase info */}
-      <div className="bg-surface rounded-2xl shadow-card p-5">
-        <div className="flex items-center gap-2 mb-4">
-          <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wide">Movement phases</h2>
-        </div>
-        <ol className="space-y-4">
-          {steps.map((step, i) => {
-            const refPhase = trueRef?.phases[i]
-            return (
-              <li key={i} className="flex items-start gap-3">
-                <span className="w-7 h-7 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
-                  {i + 1}
-                </span>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-slate-800">{step.title}</p>
-                  <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{step.instruction}</p>
-                  {refPhase && (
-                    <div className="mt-1.5 flex flex-wrap gap-1">
-                      {refPhase.keyJoints.map((j) => (
-                        <span key={j} className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">
-                          {j}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </li>
-            )
-          })}
-        </ol>
-      </div>
+      {/* ── Scrollable content ──────────────────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto px-4 py-5 space-y-5">
 
-      {/* True Reference info */}
-      <div
-        className="rounded-2xl p-4"
-        style={{ background: 'rgba(15,20,30,0.04)', border: '1px solid rgba(34,197,94,0.15)' }}
-      >
-        <div className="flex items-center gap-2 mb-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-          <span className="text-xs font-bold text-slate-700 uppercase tracking-wide">About True Reference</span>
+        {/* Hero with True Reference badge */}
+        <div
+          className="rounded-2xl p-5"
+          style={{ background: 'linear-gradient(135deg, rgba(22,163,74,0.08), rgba(34,197,94,0.04))', border: '1px solid rgba(34,197,94,0.20)' }}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <Cpu size={16} className="text-primary" />
+            <span className="text-xs font-bold text-primary uppercase tracking-wide">AI Calibration</span>
+            <span
+              className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full"
+              style={{ background: 'rgba(34,197,94,0.15)', color: '#15803d', border: '1px solid rgba(34,197,94,0.30)' }}
+            >
+              ✦ TRUE REFERENCE
+            </span>
+          </div>
+          <h1 className="text-xl font-bold text-slate-900 mb-1">{exercise.name}</h1>
+          <p className="text-sm text-slate-600 leading-relaxed">
+            I'll guide you through <strong>{steps.length} key positions</strong> using a{' '}
+            <strong>True Reference skeleton</strong> — ideal form landmarks you can visually align with.
+          </p>
         </div>
-        <ul className="space-y-1 text-xs text-slate-600 leading-relaxed">
-          <li>• A <span className="text-emerald-600 font-semibold">green ghost skeleton</span> will show the ideal pose for each step.</li>
-          <li>• <span className="text-red-500 font-semibold">Red joints</span> = significant deviation from reference.</li>
-          <li>• <span className="text-amber-500 font-semibold">Amber arrows</span> = direction to correct toward.</li>
-          <li>• Your movement is compared in real time, phase by phase.</li>
-        </ul>
-      </div>
 
-      {/* AI monitors */}
-      {exercise.aiMonitors && exercise.aiMonitors.length > 0 && (
+        {/* Steps list with reference phase info */}
         <div className="bg-surface rounded-2xl shadow-card p-5">
-          <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">AI Coach monitors</h2>
-          <ul className="space-y-1.5">
-            {exercise.aiMonitors.map((m, i) => (
-              <li key={i} className="flex items-center gap-2 text-sm text-slate-700">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
-                {m}
-              </li>
-            ))}
+          <div className="flex items-center gap-2 mb-4">
+            <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wide">Movement phases</h2>
+          </div>
+          <ol className="space-y-4">
+            {steps.map((step, i) => {
+              const refPhase = trueRef?.phases[i]
+              return (
+                <li key={i} className="flex items-start gap-3">
+                  <span className="w-7 h-7 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+                    {i + 1}
+                  </span>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-slate-800">{step.title}</p>
+                    <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{step.instruction}</p>
+                    {refPhase && (
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {refPhase.keyJoints.map((j) => (
+                          <span key={j} className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">
+                            {j}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </li>
+              )
+            })}
+          </ol>
+        </div>
+
+        {/* True Reference info */}
+        <div
+          className="rounded-2xl p-4"
+          style={{ background: 'rgba(15,20,30,0.04)', border: '1px solid rgba(34,197,94,0.15)' }}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+            <span className="text-xs font-bold text-slate-700 uppercase tracking-wide">About True Reference</span>
+          </div>
+          <ul className="space-y-1 text-xs text-slate-600 leading-relaxed">
+            <li>• A <span className="text-emerald-600 font-semibold">green ghost skeleton</span> will show the ideal pose for each step.</li>
+            <li>• <span className="text-red-500 font-semibold">Red joints</span> = significant deviation from reference.</li>
+            <li>• <span className="text-amber-500 font-semibold">Amber arrows</span> = direction to correct toward.</li>
+            <li>• Your movement is compared in real time, phase by phase.</li>
           </ul>
         </div>
-      )}
 
-      {/* Tips */}
-      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
-        <p className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-2">Tips</p>
-        <ul className="space-y-1 text-sm text-amber-800">
-          <li>• Stand 1.5–2 m away so your full body is visible.</li>
-          <li>• Good lighting helps the AI track your joints clearly.</li>
-          <li>• Align your body with the <strong>green ghost skeleton</strong>.</li>
-          <li>• Tap <strong>Analyze Step</strong> when matched, or just hold position.</li>
-        </ul>
+        {/* AI monitors */}
+        {exercise.aiMonitors && exercise.aiMonitors.length > 0 && (
+          <div className="bg-surface rounded-2xl shadow-card p-5">
+            <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">AI Coach monitors</h2>
+            <ul className="space-y-1.5">
+              {exercise.aiMonitors.map((m, i) => (
+                <li key={i} className="flex items-center gap-2 text-sm text-slate-700">
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
+                  {m}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Tips */}
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+          <p className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-2">Tips</p>
+          <ul className="space-y-1 text-sm text-amber-800">
+            <li>• Stand 1.5–2 m away so your full body is visible.</li>
+            <li>• Good lighting helps the AI track your joints clearly.</li>
+            <li>• Align your body with the <strong>green ghost skeleton</strong>.</li>
+            <li>• Tap <strong>Analyze Step</strong> when matched, or just hold position.</li>
+          </ul>
+        </div>
+
+      </div>{/* end scroll area */}
+
+      {/* ── Floating "Start Calibration" bar — always above BottomNav ── */}
+      <div
+        className="flex-shrink-0 px-4 pt-3 bg-background"
+        style={{
+          paddingBottom: 'calc(var(--nav-height) + max(var(--safe-bottom), 4px) + 4px)',
+          borderTop: '1px solid rgba(229,231,235,0.7)',
+          boxShadow: '0 -4px 20px rgba(0,0,0,0.06)',
+        }}
+      >
+        <button
+          onClick={onStart}
+          className="w-full bg-primary text-white font-bold text-base rounded-2xl py-4 min-h-[56px] active:bg-primary-dark transition-colors"
+          style={{ boxShadow: '0 4px 16px rgba(22,163,74,0.35)' }}
+        >
+          Start Calibration
+        </button>
       </div>
 
-      <button
-        onClick={onStart}
-        className="w-full bg-primary text-white font-bold text-base rounded-2xl py-4 min-h-[56px] active:bg-primary-dark transition-colors"
-      >
-        Start Calibration
-      </button>
     </div>
   )
 }
