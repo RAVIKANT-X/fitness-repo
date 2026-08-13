@@ -279,24 +279,31 @@ export interface WorkoutSessionInput {
   deviations: Array<{ id: string; severity: string }>
   /** Average reference match score 0–100 */
   avgMatchScore?: number
-  /** Per-phase reference match data if available */
-  phaseMatchData?: Array<{ phase: string; matchScore: number; primaryDeviation?: string }>
+  /**
+   * Rich per-rep trackpoint data serialised as text.
+   * Includes actual measured joint angles, depth targets, range of motion,
+   * and per-rep deviation observations with observed/threshold degrees.
+   */
+  trackDataText?: string
 }
 
 const WORKOUT_SUMMARY_PROMPT = (data: WorkoutSessionInput) => `You are FitCoach AI, an expert personal trainer and movement analyst.
 
-A user just completed a ${data.exerciseName} workout session. Analyse their performance data and give detailed coaching feedback comparing their movements to the ideal True Reference form.
+A user just completed a ${data.exerciseName} workout session. Analyse their ACTUAL MEASURED JOINT ANGLE DATA and give precise coaching feedback comparing their movements to the ideal True Reference form standards.
 
-SESSION DATA:
+${data.trackDataText ? `═══════════════════════════════════════
+ACTUAL TRACKPOINT DATA (real measured joint angles per rep):
+═══════════════════════════════════════
+${data.trackDataText}
+═══════════════════════════════════════` : `SESSION SUMMARY DATA:
 - Exercise: ${data.exerciseName}
 - Reps completed: ${data.repCount}
 - Overall form status: ${data.formStatus}
 - Duration: ${Math.round(data.durationSeconds)}s
-- Average reference match score: ${data.avgMatchScore ?? 'N/A'}%
-- Form deviations detected: ${data.deviations.length === 0 ? 'None' : data.deviations.map(d => `${d.id} (${d.severity})`).join(', ')}
-${data.phaseMatchData ? `- Phase-by-phase match:\n${data.phaseMatchData.map(p => `  ${p.phase}: ${p.matchScore}% match${p.primaryDeviation ? ` (main issue: ${p.primaryDeviation})` : ''}`).join('\n')}` : ''}
+- Avg reference match: ${data.avgMatchScore ?? 'N/A'}%
+- Deviations: ${data.deviations.length === 0 ? 'None' : data.deviations.map(d => `${d.id} (${d.severity})`).join(', ')}`}
 
-TRUE REFERENCE MOVEMENT STANDARDS for ${data.exerciseName}:
+TRUE REFERENCE STANDARDS for ${data.exerciseName}:
 ${getTrueReferenceContext(data.exerciseId)}
 
 You MUST respond with ONLY valid JSON — no markdown, no code fences.
@@ -304,28 +311,30 @@ You MUST respond with ONLY valid JSON — no markdown, no code fences.
 Respond with this exact JSON:
 {
   "formScore": 78,
-  "verdict": "1-2 sentence overall verdict on this session vs ideal True Reference form.",
+  "verdict": "1-2 sentence overall verdict. Mention specific angles if trackpoint data was provided.",
   "coachingPoints": [
     {
-      "area": "Joint/Movement area",
-      "observation": "What was observed in this session",
-      "correction": "Specific actionable correction for next time",
+      "area": "Joint/Movement area e.g. Knee Depth",
+      "observation": "What the trackpoint data shows — use actual numbers e.g. avg min knee angle was 125° vs target ≤ 110°",
+      "correction": "Specific actionable correction referencing the measured angles",
       "severity": "warning",
-      "referenceNote": "Reference ideal: 90° → observed: 72°"
+      "referenceNote": "Reference: ≤ 110° → measured avg: 125°"
     }
   ],
-  "topPriority": "The single most important thing to focus on next session.",
-  "positives": ["Something done well", "Another positive"],
-  "nextSessionTips": ["Specific drill or cue", "Another tip"]
+  "topPriority": "The single most important thing based on the angle data.",
+  "positives": ["Specific positive based on measured data", "Another positive"],
+  "nextSessionTips": ["Specific drill referencing their angle numbers", "Another tip"]
 }
 
 Rules:
-- formScore: 0–100 integer reflecting how closely movements matched True Reference
-- coachingPoints: 3–5 items; severity must be "good" | "warning" | "critical"
-- If no deviations detected, give a high score and mostly "good" severity points
-- positives: always include 1–2 genuine positives
-- nextSessionTips: 2–3 specific actionable drills or mental cues
-- Keep all text concise and coaching-focused
+- formScore: 0–100 based on actual angle data vs True Reference targets
+- coachingPoints: 3–6 items; use ACTUAL measured angles in observation and referenceNote fields
+- severity must be "good" | "warning" | "critical"
+- Reference actual rep numbers when a trend is visible (e.g. "reps 3-5 showed shallower depth")
+- If trackDataText was provided, EVERY coachingPoint must reference specific angle measurements
+- positives: reference what the data shows was done well
+- nextSessionTips: 2–3 drills targeting the weakest angles measured
+- Keep text concise; observation ≤ 30 words, correction ≤ 25 words
 - Do NOT diagnose injuries or medical conditions`
 
 function getTrueReferenceContext(exerciseId: string): string {

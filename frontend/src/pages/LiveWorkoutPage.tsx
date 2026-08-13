@@ -35,6 +35,7 @@ import { useCamera } from '../hooks/useCamera'
 import { usePoseLandmarker } from '../hooks/usePoseLandmarker'
 import { useSelectedExercise } from '../hooks/useSelectedExercise'
 import { useAnalysis } from '../hooks/useAnalysis'
+import { useRepTracker, serialiseTrackDataForGemini } from '../hooks/useRepTracker'
 import { useReferenceComparison } from '../hooks/useReferenceComparison'
 import { useVoiceCoach } from '../hooks/useVoiceCoach'
 import { saveSession } from '../services/sessionService'
@@ -98,6 +99,21 @@ export default function LiveWorkoutPage() {
     isActive,
   })
   const voice = useVoiceCoach()
+
+  // ── Per-rep trackpoint collector ──────────────────────────────────────────
+  const repTracker = useRepTracker(
+    selectedExercise?.id ?? '',
+    selectedExercise?.name ?? '',
+  )
+  // Feed every new analysisResult into the tracker
+  useEffect(() => {
+    repTracker.onAnalysisResult(analysisResult)
+  }, [analysisResult]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset tracker when exercise changes or camera stops
+  useEffect(() => {
+    repTracker.reset()
+  }, [selectedExercise?.id, isActive]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── True Reference comparison ─────────────────────────────────────────────
   const currentPhase = analysisResult?.currentPhase ?? 'UNKNOWN'
@@ -171,6 +187,12 @@ export default function LiveWorkoutPage() {
       ? Math.round(history.reduce((a, b) => a + b, 0) / history.length)
       : undefined
 
+    // Build rich trackpoint data from per-rep angle measurements
+    const trackData = repTracker.buildTrackData()
+    const trackDataText = trackData.totalReps > 0
+      ? serialiseTrackDataForGemini(trackData)
+      : undefined
+
     const result: WorkoutResult = {
       exerciseName: selectedExercise.name,
       exerciseId:   selectedExercise.id,
@@ -215,6 +237,7 @@ export default function LiveWorkoutPage() {
         saveError: errorMsg,
         requestAiSummary,
         durationSeconds,
+        trackDataText,
       },
     })
   }, [selectedExercise, analysisResult, navigate])

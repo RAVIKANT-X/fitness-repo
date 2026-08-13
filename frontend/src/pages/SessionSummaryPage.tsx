@@ -50,6 +50,8 @@ interface SummaryState {
   saveError: string | null
   requestAiSummary?: boolean
   durationSeconds?: number
+  /** Rich per-rep joint-angle text from useRepTracker */
+  trackDataText?: string
 }
 
 // ── Reference pose mini-canvas ────────────────────────────────────────────────
@@ -113,9 +115,11 @@ type AiState = 'idle' | 'loading' | 'done' | 'error'
 function AiSummarySection({
   result,
   durationSeconds,
+  trackDataText,
 }: {
   result: WorkoutResult
   durationSeconds: number
+  trackDataText?: string
 }) {
   const [aiState, setAiState] = useState<AiState>('loading')
   const [summary, setSummary]  = useState<WorkoutAISummary | null>(null)
@@ -135,6 +139,7 @@ function AiSummarySection({
       durationSeconds,
       deviations:     result.deviations.map(d => ({ id: d.id, severity: d.severity })),
       avgMatchScore:  result.avgMatchScore,
+      trackDataText,
     })
       .then((s) => { setSummary(s); setAiState('done') })
       .catch((e) => { setAiError(e instanceof Error ? e.message : 'Unknown error'); setAiState('error') })
@@ -145,7 +150,6 @@ function AiSummarySection({
     setAiState('loading')
     setAiError(null)
     setSummary(null)
-    // Re-trigger by resetting the ref and calling manually
     fetchedRef.current = true
     analyseWorkoutSession({
       exerciseName:   result.exerciseName,
@@ -155,6 +159,7 @@ function AiSummarySection({
       durationSeconds,
       deviations:     result.deviations.map(d => ({ id: d.id, severity: d.severity })),
       avgMatchScore:  result.avgMatchScore,
+      trackDataText,
     })
       .then((s) => { setSummary(s); setAiState('done') })
       .catch((e) => { setAiError(e instanceof Error ? e.message : 'Unknown error'); setAiState('error') })
@@ -390,6 +395,7 @@ export default function SessionSummaryPage() {
   const saveError:   string | null     = navState?.saveError   ?? null
   const requestAiSummary               = navState?.requestAiSummary ?? false
   const durationSeconds                = navState?.durationSeconds ?? 0
+  const trackDataText                  = navState?.trackDataText
 
   if (!result) return null
 
@@ -470,7 +476,24 @@ export default function SessionSummaryPage() {
 
       {/* ── AI Movement Summary — auto-loads when requestAiSummary=true ── */}
       {requestAiSummary && (
-        <AiSummarySection result={result} durationSeconds={durationSeconds} />
+        <AiSummarySection
+          result={result}
+          durationSeconds={durationSeconds}
+          trackDataText={trackDataText}
+        />
+      )}
+
+      {/* ── Raw trackpoint data (collapsible panel) ───────────────────── */}
+      {trackDataText && (
+        <details className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+          <summary className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide cursor-pointer select-none flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-400 inline-block" />
+            Raw Trackpoint Data — sent to AI
+          </summary>
+          <pre className="px-4 pb-4 pt-2 text-[10px] text-slate-500 font-mono leading-relaxed whitespace-pre-wrap overflow-x-auto">
+            {trackDataText}
+          </pre>
+        </details>
       )}
 
       {/* ── Deviation detail list ─────────────────────────────────────── */}
