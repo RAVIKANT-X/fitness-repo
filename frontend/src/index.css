@@ -119,8 +119,22 @@
    * and any absolute overlays inside .camera-section (z:10).
    */
   .camera-controls {
+    /*
+     * flex-shrink: 0 is the default — we keep it here explicitly.
+     * However, on the CalibrationPage the failed-state card + buttons
+     * can be taller than what the screen has available. We therefore add a
+     * max-height so the bar can scroll internally rather than overflowing
+     * behind the BottomNav.
+     *
+     *   45vh covers Analyze+Skip buttons comfortably on all phone sizes.
+     *   overflow-y: auto lets the bar grow up to that limit and then scroll.
+     *   flex-shrink: 0 is still set so the camera section does not grow into
+     *   the controls area.
+     */
     flex-shrink: 0;
     z-index: 20;
+    max-height: 45vh;
+    overflow-y: auto;
     /*
      * Reserve space above BottomNav:
      *   --nav-height  = 64px  (pill height including its own padding)

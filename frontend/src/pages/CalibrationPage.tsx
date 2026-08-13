@@ -541,7 +541,12 @@ function StepView({
       </div>
 
       {/* ── Controls (below camera) ───────────────────────────────────── */}
-      <div className="camera-controls px-4 pt-3 space-y-2 bg-background">
+      {/*
+       * overflow-y-auto: when content (e.g. the isFailed error card + buttons)
+       * is taller than the available space, the user can scroll within this bar.
+       * The camera-controls class already reserves padding-bottom for BottomNav.
+       */}
+      <div className="camera-controls overflow-y-auto px-4 pt-3 space-y-2 bg-background">
 
         {!isFailed && (
           <>

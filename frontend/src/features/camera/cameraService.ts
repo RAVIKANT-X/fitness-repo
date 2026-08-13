@@ -20,15 +20,20 @@ import type { CameraFacing, CameraError, StartCameraResult } from './cameraTypes
  */
 const VIDEO_READY_TIMEOUT_MS = 10_000
 
-/** Video constraints per facing mode. */
-function buildConstraints(facing: CameraFacing): MediaStreamConstraints {
+/**
+ * Video constraints per facing mode.
+ *
+ * We try `{ exact: facing }` first so Android browsers reliably switch to the
+ * rear camera. If that fails (OverconstrainedError — device has only one
+ * camera, or browser doesn't support exact facingMode) we fall back to the
+ * plain string value which will at least open *some* camera.
+ */
+function buildConstraints(facing: CameraFacing, exact = false): MediaStreamConstraints {
   return {
     video: {
-      facingMode: facing,
-      // 4:3 is the most common mobile camera ratio; the browser may round
-      // to the nearest supported resolution.
-      width: { ideal: 1280 },
-      height: { ideal: 960 },
+      facingMode: exact ? { exact: facing } : facing,
+      width:       { ideal: 1280 },
+      height:      { ideal: 960 },
       aspectRatio: { ideal: 4 / 3 },
     },
     audio: false,
@@ -198,38 +203,38 @@ export async function startCamera(
     }
   }
 
-  console.log('[ScanSpace] requesting camera (facing=%s)', facing)
+  console.log('[Camera] requesting camera (facing=%s)', facing)
 
-  const attempt = async (): Promise<StartCameraResult> => {
+  /**
+   * One attempt with the given constraints.
+   * Returns ok:true on success or ok:false with a mapped error.
+   */
+  const attempt = async (exact: boolean): Promise<StartCameraResult> => {
     let stream: MediaStream
 
     try {
-      stream = await navigator.mediaDevices.getUserMedia(buildConstraints(facing))
+      stream = await navigator.mediaDevices.getUserMedia(buildConstraints(facing, exact))
     } catch (err) {
       return { ok: false, error: mapBrowserError(err) }
     }
 
-    console.log('[ScanSpace] stream received — attaching to video element')
+    console.log('[Camera] stream received — attaching to video element')
     videoEl.srcObject = stream
 
     try {
       await waitForVideoReady(videoEl)
     } catch (err) {
-      // If waiting for metadata timed out, stop the acquired stream and error.
       stream.getTracks().forEach((t) => t.stop())
       videoEl.srcObject = null
       return { ok: false, error: mapBrowserError(err) }
     }
 
-    console.log('[ScanSpace] video dimensions: %dx%d — calling play()',
+    console.log('[Camera] video dimensions: %dx%d — calling play()',
       videoEl.videoWidth, videoEl.videoHeight)
 
     try {
       await videoEl.play()
     } catch (playErr) {
-      // play() rejection is usually benign on mobile (autoplay policy) — the
-      // video may already be playing due to autoPlay attribute.  Only treat
-      // it as a hard failure if the video is genuinely not playing.
       if (!videoEl.paused) {
         // Already playing — ignore the rejection.
       } else {
@@ -239,17 +244,30 @@ export async function startCamera(
       }
     }
 
-    console.log('[ScanSpace] CAMERA READY')
+    console.log('[Camera] CAMERA READY (exact=%s)', exact)
     return { ok: true, stream }
   }
 
-  const result = await attempt()
+  // First try with exact facingMode so Android rear camera works reliably.
+  let result = await attempt(true)
+
+  // Fall back to non-exact if OverconstrainedError (single-camera device)
+  // or any other constraint error.
+  if (!result.ok && (
+    result.error.name === 'OverconstrainedError' ||
+    result.error.name === 'ConstraintNotSatisfiedError' ||
+    result.error.name === 'NotFoundError' ||
+    result.error.name === 'DevicesNotFoundError'
+  )) {
+    console.log('[Camera] exact facingMode failed (%s) — retrying without exact', result.error.name)
+    result = await attempt(false)
+  }
 
   // Retry once on AbortError (transient on Android Chrome).
   if (!result.ok && result.error.name === 'AbortError') {
-    console.log('[ScanSpace] AbortError — retrying in 500 ms')
+    console.log('[Camera] AbortError — retrying in 500 ms')
     await new Promise<void>((r) => setTimeout(r, 500))
-    return attempt()
+    result = await attempt(false)
   }
 
   return result
@@ -269,7 +287,7 @@ export function stopCamera(videoEl: HTMLVideoElement, stream: MediaStream | null
 /**
  * Attempts to switch to the opposite facing mode.
  * Stops the current stream first, then starts a new one.
- * Returns an error result if the device does not support the requested mode.
+ * Uses exact facingMode first (reliable on Android) with non-exact fallback.
  */
 export async function switchCamera(
   videoEl: HTMLVideoElement,

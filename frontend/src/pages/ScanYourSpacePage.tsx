@@ -653,11 +653,21 @@ export default function ScanYourSpacePage() {
   const lastSpokenSceneStatus = useRef<string>('')
 
   // ── Step 1: user taps "Take Photo" ─────────────────────────────────────────
-  const handleGoCamera = useCallback(async () => {
-    setPhase('camera')
+  // We ONLY flip the phase here.  The camera.start() call lives in the effect
+  // below so it always runs AFTER the <video> element is mounted in the DOM.
+  const handleGoCamera = useCallback(() => {
     poseLoopStartedRef.current = false
-    await camera.start('user')
-  }, [camera])
+    setPhase('camera')
+  }, [])
+
+  // ── Start camera once phase flips to 'camera' AND videoRef is in the DOM ──
+  useEffect(() => {
+    if (phase !== 'camera') return
+    if (camera.status === 'requesting' || camera.status === 'active') return
+    // videoRef is now attached because the camera-mode render branch is active
+    camera.start('user')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase])
 
   // ── Step 2: user taps "Upload Photo" ───────────────────────────────────────
   const handleUpload = useCallback(async (file: File) => {
@@ -683,6 +693,15 @@ export default function ScanYourSpacePage() {
   }, [voice])
 
   // ── Camera becomes active in camera mode → start pose loop ─────────────────
+  // Also re-triggers when camera.facing changes (camera switch) by resetting
+  // poseLoopStartedRef so the loop restarts on the new stream.
+  useEffect(() => {
+    if (!camera.isActive || phase !== 'camera') return
+    // Reset the started-flag whenever the facing changes so we restart the loop
+    // on the new camera stream (happens after camera switch).
+    poseLoopStartedRef.current = false
+  }, [camera.facing]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (
       camera.isActive &&
