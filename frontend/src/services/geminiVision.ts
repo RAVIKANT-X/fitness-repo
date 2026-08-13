@@ -7,6 +7,36 @@
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
+// ── Workout AI Summary types ───────────────────────────────────────────────────
+
+export interface WorkoutCoachingPoint {
+  /** Joint / movement area, e.g. "Left Knee", "Elbow Extension" */
+  area: string
+  /** What was observed during the session */
+  observation: string
+  /** Specific coaching correction */
+  correction: string
+  /** How critical this is */
+  severity: 'good' | 'warning' | 'critical'
+  /** Reference ideal vs what was observed, e.g. "90° ideal → 72° observed" */
+  referenceNote?: string
+}
+
+export interface WorkoutAISummary {
+  /** Overall 0–100 form score for this session */
+  formScore: number
+  /** 1–2 sentence overall verdict */
+  verdict: string
+  /** Per-issue coaching points (3–6 items) */
+  coachingPoints: WorkoutCoachingPoint[]
+  /** The single most important thing to fix in the next session */
+  topPriority: string
+  /** 1–2 positive things the user did well */
+  positives: string[]
+  /** Specific drills / exercises to improve weak areas */
+  nextSessionTips: string[]
+}
+
 export interface PostureIssue {
   area: string           // e.g. "Head / Neck"
   observation: string    // e.g. "Head leaning forward"
@@ -235,4 +265,156 @@ export async function analyseWorkspaceFrame(base64Jpeg: string): Promise<GeminiS
 
 function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(n)))
+}
+
+// ── Workout session AI analysis ───────────────────────────────────────────────
+
+export interface WorkoutSessionInput {
+  exerciseName: string
+  exerciseId: string
+  repCount: number
+  formStatus: string
+  durationSeconds: number
+  /** Deviations detected during the session */
+  deviations: Array<{ id: string; severity: string }>
+  /** Average reference match score 0–100 */
+  avgMatchScore?: number
+  /** Per-phase reference match data if available */
+  phaseMatchData?: Array<{ phase: string; matchScore: number; primaryDeviation?: string }>
+}
+
+const WORKOUT_SUMMARY_PROMPT = (data: WorkoutSessionInput) => `You are FitCoach AI, an expert personal trainer and movement analyst.
+
+A user just completed a ${data.exerciseName} workout session. Analyse their performance data and give detailed coaching feedback comparing their movements to the ideal True Reference form.
+
+SESSION DATA:
+- Exercise: ${data.exerciseName}
+- Reps completed: ${data.repCount}
+- Overall form status: ${data.formStatus}
+- Duration: ${Math.round(data.durationSeconds)}s
+- Average reference match score: ${data.avgMatchScore ?? 'N/A'}%
+- Form deviations detected: ${data.deviations.length === 0 ? 'None' : data.deviations.map(d => `${d.id} (${d.severity})`).join(', ')}
+${data.phaseMatchData ? `- Phase-by-phase match:\n${data.phaseMatchData.map(p => `  ${p.phase}: ${p.matchScore}% match${p.primaryDeviation ? ` (main issue: ${p.primaryDeviation})` : ''}`).join('\n')}` : ''}
+
+TRUE REFERENCE MOVEMENT STANDARDS for ${data.exerciseName}:
+${getTrueReferenceContext(data.exerciseId)}
+
+You MUST respond with ONLY valid JSON — no markdown, no code fences.
+
+Respond with this exact JSON:
+{
+  "formScore": 78,
+  "verdict": "1-2 sentence overall verdict on this session vs ideal True Reference form.",
+  "coachingPoints": [
+    {
+      "area": "Joint/Movement area",
+      "observation": "What was observed in this session",
+      "correction": "Specific actionable correction for next time",
+      "severity": "warning",
+      "referenceNote": "Reference ideal: 90° → observed: 72°"
+    }
+  ],
+  "topPriority": "The single most important thing to focus on next session.",
+  "positives": ["Something done well", "Another positive"],
+  "nextSessionTips": ["Specific drill or cue", "Another tip"]
+}
+
+Rules:
+- formScore: 0–100 integer reflecting how closely movements matched True Reference
+- coachingPoints: 3–5 items; severity must be "good" | "warning" | "critical"
+- If no deviations detected, give a high score and mostly "good" severity points
+- positives: always include 1–2 genuine positives
+- nextSessionTips: 2–3 specific actionable drills or mental cues
+- Keep all text concise and coaching-focused
+- Do NOT diagnose injuries or medical conditions`
+
+function getTrueReferenceContext(exerciseId: string): string {
+  const contexts: Record<string, string> = {
+    squat: `Standing: feet shoulder-width apart, toes slightly out, spine neutral.
+Descending: knees tracking over toes, hips hinging back and down, chest up.
+Bottom: thighs parallel to floor or below, knees at 90°, weight through heels.
+Ascending: drive through heels, knees out, hips and shoulders rise together.`,
+    pushup: `Top: arms fully extended, body in straight plank line, hands shoulder-width.
+Descending: elbows at 45° to body (not flared), controlled lowering.
+Bottom: chest near floor, elbows at ~90°, core tight throughout.
+Ascending: push through palms evenly, maintain plank position.`,
+    curl: `Extended: arms fully extended, biceps stretched, elbows near torso.
+Curling: elbows fixed at sides, forearms supinating, controlled raise.
+Peak: full contraction at top, forearms vertical or slightly past, squeeze biceps.
+Returning: slow controlled lowering, full extension before next rep.`,
+  }
+  return contexts[exerciseId] ?? 'Standard exercise form with controlled movement and proper joint alignment.'
+}
+
+/**
+ * Analyse a completed workout session using Gemini text AI.
+ * Compares the user's recorded deviations and match scores against
+ * True Reference movement standards for the exercise.
+ *
+ * No image required — uses text-only prompt with structured workout data.
+ */
+export async function analyseWorkoutSession(data: WorkoutSessionInput): Promise<WorkoutAISummary> {
+  const apiKey = import.meta.env.VITE_GEMINI_KEY as string | undefined
+
+  if (!apiKey) {
+    throw new Error('AI configuration is missing. Please contact the administrator.')
+  }
+
+  const prompt = WORKOUT_SUMMARY_PROMPT(data)
+  const url = `${GEMINI_BASE}/${GEMINI_MODEL}:generateContent?key=${apiKey}`
+
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.3, maxOutputTokens: 1200 },
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    const err = await response.text().catch(() => response.statusText)
+    throw new Error(`Gemini API error ${response.status}: ${err}`)
+  }
+
+  const json = await response.json() as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+    error?: { message: string }
+  }
+
+  if (json.error) throw new Error(`Gemini error: ${json.error.message}`)
+
+  const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+  if (!rawText) throw new Error('Gemini returned an empty response.')
+
+  const cleaned = rawText
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim()
+
+  try {
+    const parsed = JSON.parse(cleaned) as Partial<WorkoutAISummary>
+    const validSeverities = new Set(['good', 'warning', 'critical'])
+
+    return {
+      formScore:    clamp(parsed.formScore ?? 70, 0, 100),
+      verdict:      parsed.verdict ?? 'Session analysis complete.',
+      topPriority:  parsed.topPriority ?? '',
+      positives:    Array.isArray(parsed.positives) ? parsed.positives : [],
+      nextSessionTips: Array.isArray(parsed.nextSessionTips) ? parsed.nextSessionTips : [],
+      coachingPoints: Array.isArray(parsed.coachingPoints)
+        ? parsed.coachingPoints.map((p) => ({
+            area:          p.area ?? 'Movement',
+            observation:   p.observation ?? '',
+            correction:    p.correction ?? '',
+            severity:      validSeverities.has(p.severity ?? '') ? (p.severity as WorkoutCoachingPoint['severity']) : 'warning',
+            referenceNote: p.referenceNote,
+          }))
+        : [],
+    }
+  } catch {
+    throw new Error(`Gemini returned non-JSON: ${cleaned.slice(0, 200)}`)
+  }
 }

@@ -55,6 +55,8 @@ interface WorkoutResult {
   exerciseName: string; exerciseId: string
   repCount: number; formStatus: string
   deviations: Deviation[]; startedAt: string; completedAt: string
+  /** Average reference match score collected during the session */
+  avgMatchScore?: number
 }
 
 // Deviation id → spoken / displayed text
@@ -106,6 +108,16 @@ export default function LiveWorkoutPage() {
     isActive,
   })
 
+  // Track rolling average match score for the AI summary
+  const matchScoreHistoryRef = useRef<number[]>([])
+  useEffect(() => {
+    if (isActive && matchScore > 0) {
+      matchScoreHistoryRef.current.push(matchScore)
+      // Keep last 300 samples (~10s at 30fps)
+      if (matchScoreHistoryRef.current.length > 300) matchScoreHistoryRef.current.shift()
+    }
+  }, [matchScore, isActive])
+
   // Reference ghost: full TrueReference for phase-synchronised ghost
   const trueReference = selectedExercise ? getTrueReference(selectedExercise.id) : undefined
   const refPhase = selectedExercise && currentPhase !== 'UNKNOWN' && currentPhase !== 'INVALID'
@@ -149,11 +161,16 @@ export default function LiveWorkoutPage() {
   const handleStart  = () => start('user')
   const handleStop   = () => { stop(); stopLoop() }
 
-  // ── Finish Workout ──────────────────────────────────────────────────────────
-  const handleFinishWorkout = useCallback(async () => {
+  // ── End / Finish Workout ───────────────────────────────────────────────────
+  const handleFinishWorkout = useCallback(async (requestAiSummary = true) => {
     if (!selectedExercise || !analysisResult) return
 
     const completedAt = new Date().toISOString()
+    const history = matchScoreHistoryRef.current
+    const avgMatchScore = history.length > 0
+      ? Math.round(history.reduce((a, b) => a + b, 0) / history.length)
+      : undefined
+
     const result: WorkoutResult = {
       exerciseName: selectedExercise.name,
       exerciseId:   selectedExercise.id,
@@ -162,7 +179,10 @@ export default function LiveWorkoutPage() {
       deviations:   analysisResult.activeDeviations,
       startedAt:    sessionStartRef.current,
       completedAt,
+      avgMatchScore,
     }
+
+    const durationSeconds = (new Date(completedAt).getTime() - new Date(sessionStartRef.current).getTime()) / 1000
 
     handleStop()
     setSaveStatus('saving')
@@ -188,7 +208,14 @@ export default function LiveWorkoutPage() {
     }
 
     navigate('/session-summary', {
-      state: { result, saveStatus: finalStatus, savedRecord: record, saveError: errorMsg },
+      state: {
+        result,
+        saveStatus: finalStatus,
+        savedRecord: record,
+        saveError: errorMsg,
+        requestAiSummary,
+        durationSeconds,
+      },
     })
   }, [selectedExercise, analysisResult, navigate])
 
@@ -200,7 +227,8 @@ export default function LiveWorkoutPage() {
   const landmarksOk  = analysisResult?.landmarksValid ?? false
   const angles       = analysisResult?.angles ?? {}
 
-  const canFinish    = isActive && selectedExercise && repCount > 0 && saveStatus === 'idle'
+  const canFinish    = isActive && selectedExercise && saveStatus === 'idle'
+  const hasReps      = repCount > 0
 
   return (
     <div className="camera-page">
@@ -427,13 +455,19 @@ export default function LiveWorkoutPage() {
           )}
         </div>
 
-        {/* Finish Workout */}
+        {/* End Session button — always visible when camera is active */}
         {canFinish && (
           <button
-            onClick={handleFinishWorkout}
-            className="w-full bg-primary text-white font-bold rounded-2xl py-4 min-h-[56px] active:bg-primary-dark transition-colors"
+            onClick={() => handleFinishWorkout(true)}
+            className={[
+              'w-full font-bold rounded-2xl py-4 min-h-[56px] transition-colors flex items-center justify-center gap-2',
+              hasReps
+                ? 'bg-primary text-white active:bg-primary-dark'
+                : 'bg-white/10 text-white/70 border border-white/20 active:bg-white/15',
+            ].join(' ')}
           >
-            Finish Workout
+            <span>🏁</span>
+            {hasReps ? 'End Session + AI Summary' : 'End Session'}
           </button>
         )}
 
