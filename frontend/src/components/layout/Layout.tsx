@@ -1,5 +1,5 @@
 import { Outlet, useLocation, NavLink } from 'react-router-dom'
-import { Home, Dumbbell, TrendingUp, User } from 'lucide-react'
+import { Home, Dumbbell, TrendingUp, User, Sparkles } from 'lucide-react'
 import BottomNav from './BottomNav'
 
 /**
@@ -19,6 +19,7 @@ function isCameraRoute(pathname: string): boolean {
 const sidebarItems = [
   { to: '/', label: 'Home', icon: Home },
   { to: '/exercises', label: 'Exercises', icon: Dumbbell },
+  { to: '/yoga', label: 'Yoga', icon: Sparkles },
   { to: '/progress', label: 'Progress', icon: TrendingUp },
   { to: '/profile', label: 'Profile', icon: User },
 ] as const

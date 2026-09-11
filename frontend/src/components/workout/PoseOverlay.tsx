@@ -31,6 +31,7 @@ interface PoseOverlayProps {
   poses: UsePoseLandmarkerReturn['poses']
   startLoop: UsePoseLandmarkerReturn['startLoop']
   stopLoop: UsePoseLandmarkerReturn['stopLoop']
+  isActive?: boolean
 }
 
 export default function PoseOverlay({
@@ -41,6 +42,7 @@ export default function PoseOverlay({
   poses,
   startLoop,
   stopLoop,
+  isActive = true,
 }: PoseOverlayProps) {
   /**
    * Start the inference loop when the model is ready and the video is active.
@@ -48,7 +50,7 @@ export default function PoseOverlay({
    * Stop it on unmount.
    */
   useEffect(() => {
-    if (modelStatus !== 'ready') return
+    if (modelStatus !== 'ready' || !isActive) return
     const video = videoRef.current
     const canvas = canvasRef.current
     if (!video || !canvas) return
@@ -60,7 +62,7 @@ export default function PoseOverlay({
     }
     // Re-run when model becomes ready or camera is switched
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelStatus, facing])
+  }, [modelStatus, facing, isActive])
 
   const noPoseDetected = modelStatus === 'ready' && poses.length === 0
 

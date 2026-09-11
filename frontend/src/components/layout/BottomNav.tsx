@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { Home, Dumbbell, TrendingUp, User, ScanLine } from 'lucide-react'
+import { Home, Dumbbell, TrendingUp, User, ScanLine, Sparkles } from 'lucide-react'
 
 const navItems = [
   { to: '/',           label: 'Home',      icon: Home,         activeColor: '#16a34a', glowColor: 'rgba(22,163,74,0.35)'    },
   { to: '/exercises',  label: 'Exercises', icon: Dumbbell,     activeColor: '#7c3aed', glowColor: 'rgba(124,58,237,0.35)'   },
+  { to: '/yoga',       label: 'Yoga',      icon: Sparkles,     activeColor: '#14b8a6', glowColor: 'rgba(20,184,166,0.35)'  },
   { to: '/scan-space', label: 'Scan',      icon: ScanLine,     activeColor: '#0ea5e9', glowColor: 'rgba(14,165,233,0.35)'   },
   { to: '/progress',   label: 'Progress',  icon: TrendingUp,   activeColor: '#f59e0b', glowColor: 'rgba(245,158,11,0.35)'   },
   { to: '/profile',    label: 'Profile',   icon: User,         activeColor: '#f59e0b', glowColor: 'rgba(245,158,11,0.35)'   },

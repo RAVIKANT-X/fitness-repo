@@ -11,6 +11,7 @@ import ProfilePage from './pages/ProfilePage'
 import ConsultDoctorPage from './pages/ConsultDoctorPage'
 import SpecialistPage from './pages/SpecialistPage'
 import ScanYourSpacePage from './pages/ScanYourSpacePage'
+import YogaPage from './pages/YogaPage'
 import { ExerciseProvider } from './hooks/useSelectedExercise'
 
 export default function App() {
@@ -25,6 +26,7 @@ export default function App() {
             {/* Learn & Calibrate flow — entered from ExerciseDetailPage */}
             <Route path="/calibrate/:id" element={<CalibrationPage />} />
             <Route path="/workout" element={<LiveWorkoutPage />} />
+            <Route path="/yoga" element={<YogaPage />} />
             <Route path="/session-summary" element={<SessionSummaryPage />} />
             <Route path="/progress" element={<ProgressPage />} />
             <Route path="/profile" element={<ProfilePage />} />
